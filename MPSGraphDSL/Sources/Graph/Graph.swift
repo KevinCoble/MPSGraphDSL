@@ -11,6 +11,7 @@ import MetalPerformanceShadersGraph
 
 internal struct AddedNode {
     let name : String?
+    let operation: String
     let node : Node
     let mpstensor : MPSGraphTensor
     let outputShape: TensorShape
@@ -81,7 +82,9 @@ public class Graph {
     internal var resetOps: [MPSGraphOperation] = []
     internal var learningVariables: [(variable: Variable, tensor: MPSGraphTensor, loss: String)] = []
     internal var seenLearning = false
-    
+    ///  Flag for if the graph is built to accomodate batch processing
+    public private(set) var batchGraph = false
+
     //  Learning values
     internal var learningRateConstant = true
     internal var learningRate: Double = 0.05
@@ -130,13 +133,9 @@ public class Graph {
         
         //  If learning variables, get the assignment operation
         if (!learningVariables.isEmpty) {
-            //  Add the learning rate tensor
-            var lambdaTensor: MPSGraphTensor
-            if (learningRateConstant) {
-                lambdaTensor = mpsgraph.constant(learningRate, shape: [1], dataType: .float32)
-            }
-            else {
-                lambdaTensor = mpsgraph.placeholder(shape: [1], dataType: .float32, name: nil)
+            //  Verify we have a learning rate tensor
+            if (learningRateTensor == nil) {
+                throw MPSGraphDSLErrors.NoLearningNode
             }
             
             //  Get a list of the loss variables
@@ -163,7 +162,7 @@ public class Graph {
                     
                     //  Add a stochastic gradient descent for each variable tensor gradient
                     for (key, value) in gradTensors {
-                        let updateTensor = mpsgraph.stochasticGradientDescent(learningRate: lambdaTensor,
+                        let updateTensor = mpsgraph.stochasticGradientDescent(learningRate: learningRateTensor!,
                                                                               values: key,
                                                                               gradient: value,
                                                                               name: nil)
@@ -231,8 +230,11 @@ public class Graph {
                             if (!verifyNameIsUnique(fullName!)) { throw MPSGraphDSLErrors.NameNotUnique(fullName!) }
                         }
                         
+                        var opName = String(describing: node)
+                        if (opName.starts(with: "MPSGraphDSL.")) { opName = String(opName.trimmingPrefix("MPSGraphDSL.")) }
+                        
                         //  Create the added node struct
-                        let addedNode = AddedNode(name: fullName, node: node, mpstensor: addedTensor, outputShape: shape)
+                        let addedNode = AddedNode(name: fullName, operation: opName, node: node, mpstensor: addedTensor, outputShape: shape)
                         
                         //  Put added node into the list
                         allAddedNodes.append(addedNode)
@@ -686,7 +688,7 @@ public class Graph {
                 nameString = name
             }
             
-            print ("\(addedNode.outputShape.dimensions) - \(nameString)")
+            print ("\(addedNode.operation) produces Tensor of shape: \(addedNode.outputShape.dimensions) - named: \(nameString)")
         }
     }
     

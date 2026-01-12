@@ -110,3 +110,41 @@ public class Sigmoid : UnaryNode {
         return [sigmoidResult]
     }
 }
+
+///   Enumeration for selecting the activation function of a Neural Network layer
+public enum ActivationFunction {
+    case none
+    case relu
+    case tanh
+    case sigmoid
+    case leakyRelu(Double)
+    case leakyReluFromTensor(String)
+    
+    func addActivation(graph: Graph, inputTensor: MPSGraphTensor, name: String?) throws -> MPSGraphTensor? {
+        switch (self) {
+            case .none:
+                return nil
+            case .relu:
+                let reLUResult = graph.mpsgraph.reLU(with: inputTensor, name: graph.getFullName(name))
+                return reLUResult
+            case .tanh:
+                let tanhResult = graph.mpsgraph.tanh(with: inputTensor, name: graph.getFullName(name))
+                return tanhResult
+            case .sigmoid:
+                let sigmoidResult = graph.mpsgraph.sigmoid(with: inputTensor, name: graph.getFullName(name))
+                return sigmoidResult
+            case .leakyRelu(let alpha):
+                let leakyReLUResult = graph.mpsgraph.leakyReLU(with: inputTensor, alpha: alpha, name: graph.getFullName(name))
+                return leakyReLUResult
+            case .leakyReluFromTensor(let alphaName):
+                if let alphaNode = graph.findNamedNode(alphaName) {
+                    let leakyReLUResult = graph.mpsgraph.leakyReLU(with: inputTensor, alphaTensor: alphaNode.mpstensor, name: graph.getFullName(name))
+                    return leakyReLUResult
+                }
+                else {
+                    throw MPSGraphDSLErrors.NamedTensorNotFound(alphaName)
+                }
+        }
+
+    }
+}

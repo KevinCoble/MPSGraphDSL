@@ -9,16 +9,6 @@ import Foundation
 import MetalPerformanceShaders
 import MetalPerformanceShadersGraph
 
-///   Enumeration for selecting the activation function of a Neural Network layer
-public enum ActivationFunction {
-    case none
-    case relu
-    case tanh
-    case sigmoid
-    case leakyRelu(Double)
-    case leakyReluFromTensor(String)
-}
-
 ///   Node for a fully-connected Neural Network layer, with specified output shape and activation function
 ///
 public class FullyConnectedLayer : UnaryNode {
@@ -38,6 +28,7 @@ public class FullyConnectedLayer : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - outputShape: The shape of the output tensor.  This dictates the number of fully-connected nodes in the layer
+    ///   - activationFunction: The activation function for the layer
     ///   - name: The name for this node and its associated tensor.  The variable nodes will be named &ltname&gt_weights' and &ltname&gt_biases'
     public init(input: String? = nil, outputShape: TensorShape, activationFunction: ActivationFunction, name: String) {
         self.outputShape = outputShape
@@ -179,7 +170,7 @@ public class FullyConnectedLayer : UnaryNode {
                     targetIndices.append(suffixes.count)
                     suffixes.append("")
                 }
-                let additionTensor = graph.mpsgraph.addition(matrixMultResult, biasTensor, name: graph.getFullName(name))
+                let additionTensor = graph.mpsgraph.addition(matrixMultResult, biasTensor, name: biasTensorName)
                 addedTensors.append(additionTensor)
                 finalTensor = additionTensor
             }
@@ -189,41 +180,13 @@ public class FullyConnectedLayer : UnaryNode {
         }
         
         //  Add any activation function
-        if let activationTensor = try addActivation(activation: activationFunction, graph: graph, inputTensor: finalTensor) {
+        if let activationTensor = try activationFunction.addActivation(graph: graph, inputTensor: finalTensor, name: name) {
             addedTensors.append(activationTensor)
             targetIndices.append(suffixes.count)
             suffixes.append("")
         }
 
         return addedTensors
-    }
-    
-    func addActivation(activation: ActivationFunction, graph: Graph, inputTensor: MPSGraphTensor) throws -> MPSGraphTensor? {
-        switch (activation) {
-            case .none:
-                return nil
-            case .relu:
-                let reLUResult = graph.mpsgraph.reLU(with: inputTensor, name: graph.getFullName(name))
-                return reLUResult
-            case .tanh:
-                let tanhResult = graph.mpsgraph.tanh(with: inputTensor, name: graph.getFullName(name))
-                return tanhResult
-            case .sigmoid:
-                let sigmoidResult = graph.mpsgraph.sigmoid(with: inputTensor, name: graph.getFullName(name))
-                return sigmoidResult
-            case .leakyRelu(let alpha):
-                let leakyReLUResult = graph.mpsgraph.leakyReLU(with: inputTensor, alpha: alpha, name: graph.getFullName(name))
-                return leakyReLUResult
-            case .leakyReluFromTensor(let alphaName):
-                if let alphaNode = graph.findNamedNode(alphaName) {
-                    let leakyReLUResult = graph.mpsgraph.leakyReLU(with: inputTensor, alphaTensor: alphaNode.mpstensor, name: graph.getFullName(name))
-                    return leakyReLUResult
-                }
-                else {
-                    throw MPSGraphDSLErrors.NamedTensorNotFound(alphaName)
-                }
-        }
-
     }
     
     override internal func getNodeSuffixes() -> [String] {
@@ -235,7 +198,7 @@ public class FullyConnectedLayer : UnaryNode {
         return targetIndices
     }
 
-    ///  Modifier to turm of addition of a bias term after the matrix multiplication
+    ///  Modifier to turn off addition of a bias term after the matrix multiplication
     public func noBiasTerm() -> FullyConnectedLayer {
         useBias = false
         return self

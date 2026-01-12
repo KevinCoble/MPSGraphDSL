@@ -31,7 +31,10 @@ let banding = false
 let argSort = false
 let broadcast = false
 let flatten = false
-let onehot = true
+let onehot = false
+let dropout = false
+let quantize = false
+let pool = false
 
 if matrixMultiplication {
     let MMvectorTensor = try TensorFloat32(shape: TensorShape([2]), initialValues: [7.0, 8.0])
@@ -642,5 +645,119 @@ if (onehot) {
     let results = try oneHotGraph.runOne(mode: "oneHotTest", inputTensors: [:])
     let result = results["result"]!
     print("result tensor shape \(result.shape.dimensions)")
+    try result.print2D(elementWidth: 6, precision: 1)
+}
+
+if (dropout) {
+    let initialTensor = try TensorFloat32(shape: TensorShape([4, 5]), initialValues: [7.0, 2.0, 1.0, 9.0, 5.0, 6.0, 3.0, 8.0, 1.2, -2.0, 9.0, 17.0, 6.3, 5.8, 14.0, 2.3, 16.0,  7.2,  10.3, 6.7])
+    //                                                                              [7.0,  2.0,  1.0,  9.0,  5.0
+    //                                                                               6.0,  3.0,  8.0,  1.2, -2.0
+    //                                                                               9.0, 17.0,  6.3,  5.8, 14.0
+    //                                                                               2.3, 16.0,  7.2,  10.3, 6.7]
+    print("Initial Tensor")
+    try initialTensor.print2D(elementWidth: 6, precision: 1)
+    
+    let dropOutGraph = Graph {
+        Constant(values: initialTensor, name: "startTensor")
+        Dropout(rate: 0.3, name: "result")
+            .targetForModes(["dropOutTest"])
+    }
+
+    print("Drop-out with rate of 0.3")
+    let results = try dropOutGraph.runOne(mode: "dropOutTest", inputTensors: [:])
+    let result = results["result"]!
+    try result.print2D(elementWidth: 6, precision: 1)
+}
+
+if (quantize) {
+    let initialTensor = try TensorFloat32(shape: TensorShape([4, 5]), initialValues: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75,  0.85,  0.95])
+    //                                                                              [0.0,  0.1,  0.2,   0.3,  0.4
+    //                                                                               0.5,  0.6,  0.7,   0.8,  0.9
+    //                                                                               1.0,  0.15, 0.25,  0.35, 0.45
+    //                                                                               0.55, 0.65, 0.75,  0.85, 0.95]
+    print("Initial Tensor")
+    try initialTensor.print2D(elementWidth: 6, precision: 1)
+    
+    let quantizeGraph = Graph {
+        Constant(values: initialTensor, name: "startTensor")
+        Quantize(scale: 1.0 / 255.0, zeroPoint: 0.0, signed: false, name: "result")
+            .targetForModes(["quantizeTest"])
+    }
+
+    print("Quantize with scale = 1/255, zeropoint = 0")
+    let results = try quantizeGraph.runOne(mode: "quantizeTest", inputTensors: [:])
+    let result = results["result"]!
+    try result.print2D(elementWidth: 6, precision: 0)
+    
+    let quantizeGraph2 = Graph {
+        Constant(values: initialTensor, name: "startTensor")
+        Constant(shape: [5], value: Float32(1.0 / 255.0), name: "scaleConstant")
+        Quantize("startTensor", scaleTensor: "scaleConstant", zeroPoint: 3.0, signed: false, axis: 0, name: "result")
+            .targetForModes(["quantizeTest"])
+    }
+
+    print("Quantize with tensor scale = 1/255, zeropoint = 3, axis = 0")
+    let results2 = try quantizeGraph2.runOne(mode: "quantizeTest", inputTensors: [:])
+    let result2 = results2["result"]!
+    try result2.print1D(elementWidth: 6, precision: 1)
+
+}
+
+if (pool) {
+    let initialTensor = try TensorFloat32(shape: TensorShape([4, 5]), initialValues: [7.0, 2.0, 1.0, 9.0, 5.0, 6.0, 3.0, 8.0, 1.2, -2.0, 9.0, 17.0, 6.3, 5.8, 14.0, 2.3, 16.0,  7.2,  10.3, 6.7])
+    //                                                                              [7.0,  2.0,  1.0,  9.0,  5.0
+    //                                                                               6.0,  3.0,  8.0,  1.2, -2.0
+    //                                                                               9.0, 17.0,  6.3,  5.8, 14.0
+    //                                                                               2.3, 16.0,  7.2,  10.3, 6.7]
+    print("Initial Tensor")
+    try initialTensor.print2D(elementWidth: 6, precision: 1)
+    
+    let poolingGraph = Graph {
+        Constant(values: initialTensor, name: "startTensor")
+        PoolingLayer(function: .max, kernelSize: [2, 2], strides: [2, 3], name: "result")
+            .targetForModes(["poolingTest"])
+    }
+
+    print("Max Pooling with kernal [2, 2] and strides [2, 3]")
+    var results = try poolingGraph.runOne(mode: "poolingTest", inputTensors: [:])
+    var result = results["result"]!
+    try result.print2D(elementWidth: 6, precision: 1)
+    
+    let threeDTensor = try TensorFloat32(shape: TensorShape([3, 3, 3]), initialValues: [7.0, 2.0, 1.0, 9.0, 5.0, 6.0, 3.0, 8.0, 1.2, -2.0, 9.0, 17.0, 6.3, 5.8, 14.0, 2.3, 16.0,  7.2,  10.3, 6.7, 8.2, 11.1, 5.9, 3.3, 2.4, 44.0, 12.3])
+    //                                                                              [[   7.0,   9.0,   3.0]   [[   2.0,   5.0,   8.0]   [[   1.0,   6.0,   1.2]
+    //                                                                               [  -2.0,   6.3,   2.3]    [   9.0,   5.8,  16.0]    [  17.0,  14.0,   7.2]
+    //                                                                               [  10.3,  11.1,   2.4]]   [   6.7,   5.9,  44.0]]   [   8.2,   3.3,  12.3]]
+    print("Three-dimensional Tensor split on last dimension")
+    try threeDTensor.print3D(elementWidth: 6, precision: 1)
+    
+    let poolingGraph3D = Graph {
+        Constant(values: threeDTensor, name: "startTensor")
+        PoolingLayer(function: .max, kernelSize: [3, 3], strides: [3, 3], name: "result")
+            .targetForModes(["poolingTest"])
+    }
+
+    print("Max Pooling with kernal [3, 3] and strides [3, 3]")
+    results = try poolingGraph3D.runOne(mode: "poolingTest", inputTensors: [:])
+    result = results["result"]!
+    try result.print3D(elementWidth: 6, precision: 1)
+    
+    let wideTensor = try TensorFloat32(shape: TensorShape([2, 10]), initialValues: [7.0, 2.0, 1.0, 9.0, 5.0, 6.0, 3.0, 8.0, 1.2, -2.0, 9.0, 17.0, 6.3, 5.8, 14.0, 2.3, 16.0,  7.2,  10.3, 6.7])
+    print("")
+    print("")
+    print("Initial Wide Tensor")
+    try wideTensor.print2D(elementWidth: 6, precision: 1)
+
+    let poolingGraph2 = Graph {
+        Constant(values: wideTensor, name: "startTensor")
+        PoolingLayer(function: .max, kernelSize: [2, 2], strides: [1, 3], name: "result")
+            .setCeilingMode()
+            .dilationRates(dilationRateH: 2, dilationRateW: 2)
+            .HWPadding(bottomPadding: 0, topPadding: 0, leftPadding: 5, rightPadding: 5)
+            .targetForModes(["poolingTest"])
+    }
+
+    print("Max Pooling with kernal [2, 2] and strides [1, 2]")
+    results = try poolingGraph2.runOne(mode: "poolingTest", inputTensors: [:])
+    result = results["result"]!
     try result.print2D(elementWidth: 6, precision: 1)
 }

@@ -1,41 +1,44 @@
 //
-//  RNNLayer.swift
+//  GRULayer.swift
 //  MPSGraphDSL
 //
-//  Created by Kevin Coble on 1/1/26.
+//  Created by Kevin Coble on 1/4/26.
 //
 
 import Foundation
 import MetalPerformanceShaders
 import MetalPerformanceShadersGraph
 
-///  Class that wraps the standard MPSGraph singleGateRNN node
-public class SingleGateRNN : UnaryNode {
+///  Class that wraps the standard MPSGraph GRU node
+public class GRU: UnaryNode {
     let recurrentWeight: String?
     let inputWeight: String?
     let bias: String?
     let initState: String?
     let mask: String?
-    let descriptor: MPSGraphSingleGateRNNDescriptor
+    let secondaryBias: String?
+    let descriptor: MPSGraphGRUDescriptor
 
     var suffixes: [String] = []
 
-    /// Constructor for a single-gate RNN operation.  Direct wrap of MPSGraph functions - see Apple documentation for input shape limits, etc.
+    /// Constructor for an GRU operation.  Direct wrap of MPSGraph functions - see Apple documentation for input shape limits, etc.
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input.  If nil the previous node's output will be used
     ///   - recurrentWeight: (Optional) The name of the tensor that will provide the recurrent weights (usually a Variable).  If nil the previous node's output will be used
-    ///   - inputWeight: (Optional) The name of the tensor that will provide the input weights (usually a Variable).  If nil no input weights are used  Defaults to nil
+    ///   - inputWeight: (Optional) The name of the tensor that will provide the input weights (usually a Variable).  If nil a diagonal unit matrix is used.  Defaults to nil
     ///   - bias: (Optional) The name of the tensor that will provide the bias values (usually a Variable).  If nil no bias values are used  Defaults to nil
     ///   - initState: (Optional) The name of the tensor that will provide the initial state values.  If nil a zero tensor is used.  Defaults to nil
     ///   - mask: (Optional) The name of the tensor containing the mask m, if missing the operation assumes ones.
-    ///   - descriptor: The LSTM options structure
+    ///   - secondaryBias: (Optional) The name of the tensor containing the secondary bias tensor., if missing the operation assumes zeroes.  Only used with reset_after = YES
+    ///   - descriptor: The GRU options structure
     ///   - name: (Optional) The name for this node and its associated tensors.  One or two tensors will be produced
-    public init(input: String? = nil, recurrentWeight: String? = nil, inputWeight: String? = nil, bias: String? = nil, initState: String? = nil, mask: String? = nil, descriptor: MPSGraphSingleGateRNNDescriptor, name: String? = nil) {
+    public init(input: String? = nil, recurrentWeight: String? = nil, inputWeight: String? = nil, bias: String? = nil, initState: String? = nil, mask: String? = nil, secondaryBias: String? = nil, descriptor: MPSGraphGRUDescriptor, name: String? = nil) {
         self.recurrentWeight = recurrentWeight
         self.inputWeight = inputWeight
         self.bias = bias
         self.initState = initState
         self.mask = mask
+        self.secondaryBias = secondaryBias
         self.descriptor = descriptor
         super.init(input: input, name: name)
     }
@@ -106,31 +109,47 @@ public class SingleGateRNN : UnaryNode {
             //  nil mask tensor node name - set to nil to not use
             maskMPSTensor = nil
         }
+        
+        //  Get the secondary bias tensor
+        let secondaryBiasMPSTensor: MPSGraphTensor?
+        if let secondaryBias = secondaryBias {
+            if let addedNode = graph.findNamedNode(secondaryBias) {
+                secondaryBiasMPSTensor = addedNode.mpstensor
+            }
+            else {
+                throw MPSGraphDSLErrors.NamedTensorNotFound(secondaryBias)
+            }
+        }
+        else {
+            //  nil peephole tensor node name - set to nil to not use
+            secondaryBiasMPSTensor = nil
+        }
 
         //  Get the output suffixes
         suffixes = []
         suffixes.append("_state")
         if (descriptor.training) { suffixes.append("_trainingState") }
+        
         //  Add the node
-        if (maskMPSTensor == nil) {
-            if (inputMPSTensor == nil && biasMPSTensor == nil) {
-                let rnnResults = graph.mpsgraph.singleGateRNN(inputTensor, recurrentWeight: recurrentMPSTensor, initState: initStateMPSTensor, descriptor: descriptor, name: graph.getFullName(name))
+        if (maskMPSTensor == nil && secondaryBiasMPSTensor == nil) {
+            if (initStateMPSTensor == nil) {
+                let gruResults = graph.mpsgraph.GRU(inputTensor, recurrentWeight: recurrentMPSTensor, inputWeight: inputMPSTensor, bias: biasMPSTensor, descriptor: descriptor, name: graph.getFullName(name))
                 
                 //  Return the result
-                return rnnResults
+                return gruResults
             }
             else {
-                let rnnResults = graph.mpsgraph.singleGateRNN(inputTensor, recurrentWeight: recurrentMPSTensor, inputWeight: inputMPSTensor, bias:biasMPSTensor, initState: initStateMPSTensor, descriptor: descriptor, name: graph.getFullName(name))
+                let gruResults = graph.mpsgraph.GRU(inputTensor, recurrentWeight: recurrentMPSTensor, inputWeight: inputMPSTensor, bias: biasMPSTensor, initState: initStateMPSTensor, descriptor: descriptor, name: graph.getFullName(name))
                 
                 //  Return the result
-                return rnnResults
+                return gruResults
             }
         }
         else {
-            let rnnResults = graph.mpsgraph.singleGateRNN(inputTensor, recurrentWeight: recurrentMPSTensor, inputWeight: inputMPSTensor, bias:biasMPSTensor, initState: initStateMPSTensor, mask: maskMPSTensor, descriptor: descriptor, name: graph.getFullName(name))
+            let gruResults = graph.mpsgraph.GRU(inputTensor, recurrentWeight: recurrentMPSTensor, inputWeight: inputMPSTensor, bias: biasMPSTensor, initState: initStateMPSTensor, mask: maskMPSTensor, secondaryBias: secondaryBiasMPSTensor, descriptor: descriptor, name: graph.getFullName(name))
             
             //  Return the result
-            return rnnResults
+            return gruResults
         }
     }
     
@@ -139,11 +158,14 @@ public class SingleGateRNN : UnaryNode {
     }
 }
 
-///  Layer for a standard single-gate RNN.  All weights are created as Variables
-public class RNNLayer: UnaryNode {
+
+///  Layer for a standard GRU.  All weights are created as Variables
+public class GRULayer: UnaryNode {
     let stateSize: Int
     
-    var activation: MPSGraphRNNActivation = .tanh
+    var outputGateActivation: MPSGraphRNNActivation = .tanh
+    var resetGateActivation: MPSGraphRNNActivation = .sigmoid
+    var updateGateActivation: MPSGraphRNNActivation = .sigmoid
     var recurrentWeightInitialMinimum : Double = -0.5
     var recurrentWeightInitialMaximum : Double = 0.5
     var inputWeightInitialMinimum : Double = -0.5
@@ -153,18 +175,19 @@ public class RNNLayer: UnaryNode {
     var createLastState: Bool = true
     var targetLoop: Bool = false
     var targetLast: Bool = true
+
     var lossNode: String? = nil
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
 
-    /// Constructor for an RNN layer.
+    /// Constructor for an GRU layer.
     /// State size is passed in.  Number of features and number of inputs are determined from the input tensor
     /// Default setup is used.  To change, use supplied modifiers
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input.  If nil the previous node's output will be used  Must be of shape \[T, N, I\]
     ///   - stateSize: The number of state datum (neurons) in the cell and state tensors
-    ///   - name: (Optional) The name for this node and its associated tensors.  One or two tensors will be produced
+    ///   - name: (Optional) The name for this node and its associated tensors.  One to three tensors will be produced
     public init(input: String? = nil, stateSize: Int, name: String? = nil) {
         self.stateSize = stateSize
         super.init(input: input, name: name)
@@ -192,7 +215,7 @@ public class RNNLayer: UnaryNode {
         }
         
         //  Add the recurrent weights variable
-        let rweightsShape = TensorShape([stateSize, stateSize])       //  [H, H]
+        let rweightsShape = TensorShape([3*stateSize, stateSize])       //  [3H, H]
         let rweightsRange = try ParameterRange(minimum: recurrentWeightInitialMinimum, maximum: recurrentWeightInitialMaximum)
         let rweights = TensorFloat32(shape: rweightsShape, randomValueRange: rweightsRange)
         let rweightData = rweights.getData()
@@ -214,7 +237,7 @@ public class RNNLayer: UnaryNode {
         }
         
         //  Add the input weights variable
-        let iweightsShape = TensorShape([stateSize, numInputs])       //  [H, I]
+        let iweightsShape = TensorShape([3*stateSize, numInputs])       //  [3H, I]
         let iweightsRange = try ParameterRange(minimum: recurrentWeightInitialMinimum, maximum: recurrentWeightInitialMaximum)
         let iweights = TensorFloat32(shape: iweightsShape, randomValueRange: iweightsRange)
         let iweightData = iweights.getData()
@@ -236,7 +259,7 @@ public class RNNLayer: UnaryNode {
         }
         
         //  Add the bias variable
-        let biasShape = TensorShape([stateSize])       //  [H]
+        let biasShape = TensorShape([3*stateSize])       //  [3H]
         let biasRange = try ParameterRange(minimum: recurrentWeightInitialMinimum, maximum: recurrentWeightInitialMaximum)
         let bias = TensorFloat32(shape: biasShape, randomValueRange: biasRange)
         let biasData = bias.getData()
@@ -258,11 +281,16 @@ public class RNNLayer: UnaryNode {
         }
         
         //  Create the descriptor
-        let descriptor = MPSGraphSingleGateRNNDescriptor()
-        descriptor.activation = activation
+        let descriptor = MPSGraphGRUDescriptor()
         descriptor.bidirectional = false
+        descriptor.flipZ = false
+        descriptor.outputGateActivation = outputGateActivation
+        descriptor.resetAfter = false
+        descriptor.resetGateActivation = resetGateActivation
+        descriptor.resetGateFirst = false
         descriptor.reverse = false
         descriptor.training = (lossNode != nil)
+        descriptor.updateGateActivation = updateGateActivation
         
         //  Get the suffixes for the output tensor
         if (targetLoop) { targetIndices.append(suffixes.count) }
@@ -272,13 +300,17 @@ public class RNNLayer: UnaryNode {
             suffixes.append("_z")
         }
         
-        let rnn = graph.mpsgraph.singleGateRNN(inputTensor, recurrentWeight: rweightTensor, inputWeight: iweightTensor, bias: biasTensor, initState: nil, descriptor: descriptor, name: graph.getFullName(name))
-        addedTensors += rnn
+//        let desc2 = MPSGraphLSTMDescriptor()
+//        desc2.training = (lossNode != nil)
+//        var gru = graph.mpsgraph.LSTM(inputTensor, recurrentWeight: rweightTensor, inputWeight: iweightTensor, bias: biasTensor, initState: nil, initCell: nil, descriptor: desc2, name: graph.getFullName(name))
+//        gru.removeLast()
+        let gru = graph.mpsgraph.GRU(inputTensor, recurrentWeight: rweightTensor, inputWeight: iweightTensor, bias: biasTensor, initState: nil, descriptor: descriptor, name: graph.getFullName(name))
+        addedTensors += gru
         
         //  If requested to create a 'last state' output, do so
         if (createLastState) {
             let stateSliceName = graph.getFullName(name)! + "_lastStateSlice"
-            let stateSlice = graph.mpsgraph.sliceTensor(rnn.first!, dimension: 0, start: -1, length: 1, name: stateSliceName)
+            let stateSlice = graph.mpsgraph.sliceTensor(gru.first!, dimension: 0, start: -1, length: 1, name: stateSliceName)
             addedTensors.append(stateSlice)
             suffixes.append("_lastStateSlice")
             
@@ -308,28 +340,40 @@ public class RNNLayer: UnaryNode {
         return targetIndices
     }
     
-    ///  Modifier to set the activation function for the RNN layer.  Default is tanh
-    public func activationFunction(_ activation: MPSGraphRNNActivation) -> RNNLayer {
-        self.activation = activation
+    ///  Modifier to set the output gate activation function for the GRU layer.  Default is tanh
+    public func outputGateActivation(_ activation: MPSGraphRNNActivation) -> GRULayer {
+        self.outputGateActivation = activation
         return self
     }
     
+    ///  Modifier to set the reset gate activation function for the GRU layer.  Default is sigmoid
+    public func resetGateActivation(_ activation: MPSGraphRNNActivation) -> GRULayer {
+        self.resetGateActivation = activation
+        return self
+    }
+    
+    ///  Modifier to set the update gate activation function for the GRU layer.  Default is sigmoid
+    public func updateGateActivation(_ activation: MPSGraphRNNActivation) -> GRULayer {
+        self.updateGateActivation = activation
+        return self
+    }
+
     ///  Modifier to set the range for the random initializer of the recurrent weights.  Default is -0.5 to 0.5
-    public func recurrentWeightInitialRange(min: Double, max: Double) -> RNNLayer {
+    public func recurrentWeightInitialRange(min: Double, max: Double) -> GRULayer {
         recurrentWeightInitialMinimum = min
         recurrentWeightInitialMaximum = max
         return self
     }
     
     ///  Modifier to set the range for the random initializer of the input weights.  Default is -0.5 to 0.5
-    public func inputWeightInitialRange(min: Double, max: Double) -> RNNLayer {
+    public func inputWeightInitialRange(min: Double, max: Double) -> GRULayer {
         inputWeightInitialMinimum = min
         inputWeightInitialMaximum = max
         return self
     }
     
     ///  Modifier to set the range for the random initializer of the bias.  Default is -0.5 to 0.5
-    public func biasInitialRange(min: Double, max: Double) -> RNNLayer {
+    public func biasInitialRange(min: Double, max: Double) -> GRULayer {
         biasInitialMinimum = min
         biasInitialMaximum = max
         return self
@@ -341,7 +385,7 @@ public class RNNLayer: UnaryNode {
     ///   - targetLoop: (Optional)  If true the time loop output (state) is marked as target tensors if the node is marked as a target.  Defaults to false
     ///   - targetLast: (Optional)  If true the last-time output (state ) is marked as target tensors if the node is marked as a target.  Defaults to false
     /// - Returns: The LSTMLayer node
-    public func setOutput(createLastState: Bool = true, targetLoop: Bool = false, targetLast: Bool = true) -> RNNLayer {
+    public func setOutput(createLastState: Bool = true, targetLoop: Bool = false, targetLast: Bool = true) -> GRULayer {
         self.createLastState = createLastState
         self.targetLoop = targetLoop
         self.targetLast = targetLast
@@ -349,7 +393,7 @@ public class RNNLayer: UnaryNode {
     }
     
     ///  Modifier to set the LSTM layer to learn with respect to a loss calculation.  The z tensor will be output if this is used
-    public func learnWithRespectTo(_ lossNode: String) -> RNNLayer {
+    public func learnWithRespectTo(_ lossNode: String) -> GRULayer {
         self.lossNode = lossNode
         return self
     }

@@ -73,3 +73,6 @@ Reading the five articles referenced above will definitely get you well on your 
 
 - ``FullyConnectedLayer``
 - ``LSTMLayer``
+- ``ConvolutionLayer``
+- ``PoolingLayer``
+- ``Learning``

@@ -9,7 +9,7 @@ import Foundation
 import MetalPerformanceShaders
 import MetalPerformanceShadersGraph
 
-///  Class that wraps the standard MPSGraph LSTMNode
+///  Class that wraps the standard MPSGraph LSTM Node
 public class LSTM: UnaryNode {
     let recurrentWeight: String?
     let inputWeight: String?
@@ -229,7 +229,7 @@ public class LSTMLayer: UnaryNode {
         //lstm        let numFeatures: Int
         let numInputs: Int
         if let inputShape = inputTensor.shape {
-            if (inputShape.count != 3) { throw MPSGraphLSTMGRUErrors.InputTensorNot3D }
+            if (inputShape.count != 3) { throw MPSGraphNeuralNetErrors.InputTensorNot3D }
             //lstm            numFeatures = Int(truncating: inputShape[1])
             numInputs = Int(truncating: inputShape[2])
         }
@@ -316,7 +316,7 @@ public class LSTMLayer: UnaryNode {
         descriptor.reverse = false
         descriptor.training = (lossNode != nil)
         
-        //  Get the suffixes for the output tensor
+        //  Get the suffixes for the output tensors
         if (targetLoops) { targetIndices.append(suffixes.count) }
         suffixes.append("_state")
         if (descriptor.produceCell || descriptor.training) {
@@ -366,7 +366,7 @@ public class LSTMLayer: UnaryNode {
         }
         
         if (!targetModes.isEmpty && targetIndices.isEmpty) {
-            throw MPSGraphLSTMGRUErrors.NoConfiguredTargetTensorsForTargettedNode
+            throw MPSGraphNeuralNetErrors.NoConfiguredTargetTensorsForTargettedNode
         }
         
         return addedTensors

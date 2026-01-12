@@ -102,6 +102,8 @@ public enum MPSGraphDSLErrors : Error {
     case ModifierNotAvailableOnNode(String)
     ///  There were no Variable nodes set to learn in the graph
     case NoLearningVariablesInGraph
+    ///  There were learning Variable nodes in the graph with no Learning node
+    case NoLearningNode
     ///  A Transpose operation on a one-dimensional Tensor (vector) is undefined
     case TransposeOnVectorNotSupported
     ///  A Transpose operation on more than a two-dimensional Tensor requires dimension specification
@@ -118,12 +120,22 @@ public enum MPSGraphDSLErrors : Error {
     case MultipleDimensionsNotSupported
 }
 
-///  Errors that can be thrown by the MPSGraph building system when dealing with LSTM and GRU layers
-public enum MPSGraphLSTMGRUErrors : Error {
-    ///  Input tensors to LSTMs must have rank 3 \[T, N, I\]
+///  Errors that can be thrown by the MPSGraph building system when dealing with neural network layers
+public enum MPSGraphNeuralNetErrors : Error {
+    ///  Input tensors to Pooling must be at least 2 dimensions
+    case InputTensorNot2DOrMore
+    ///  Input tensors to Pooling must be at most 4 dimensions
+    case InputTensorMoreThan4D
+    ///  The sizing parameter for the kernal must be at or less than the input ranke
+    case KernelRankGreaterThanInput
+    ///  The number of dimensions in the kernal size specification and the strides specification must match
+    case StridesDifferentRankThanKernel
+    ///  Input tensors to LSTMs and GRUs must have rank 3 \[T, N, I\]
     case InputTensorNot3D
     ///  The node is configured to not produce any targettable tensors although it has been configured as a target
     case NoConfiguredTargetTensorsForTargettedNode
+    ///  A convolution with a kernel rank of 2 was attempted on a tensor with a dimension marked as a channel dimension.
+    case ConvolutionOnTensorsWithChannelsMustBe3D
 }
 
 ///  Errors that can be thrown by the MPSGraph run system

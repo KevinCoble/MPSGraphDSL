@@ -81,6 +81,62 @@ extension Tensor {
             line = " "
         }
     }
+    
+    /// Print out a 3-dimensional (row-column-channel or batch-row-column) tensor as a string of values with specified width and precision, as a row of 2D matrixes
+    /// - Parameters:
+    ///   - elementWidth: The width each value will be.  Left-side spaces added as needed
+    ///   - precision: The precision (number of digits to the right of the decimal point
+    ///   - splitLastDimension:(Optional) If true (the default), tensor is treated as row-column channel and each matrix printed is different in the last dimension.  Otherwise batch-row-column and each matrix is different in first dimension
+    /// - Throws: `GenericMPSGraphDSLErrors.InvalidShape` if the Tensor is not 3-dimensional
+    public func print3D(elementWidth: Int, precision : Int, splitLastDimension: Bool = true) throws {
+        if (shape.dimensions.count != 3) { throw GenericMPSGraphDSLErrors.InvalidShape }
+        let numRows: Int
+        let numCols: Int
+        let numMatrices: Int
+        if (splitLastDimension) {
+            numRows = shape.dimensions[0]
+            numCols = shape.dimensions[1]
+            numMatrices = shape.dimensions[2]
+        }
+        else {
+            numRows = shape.dimensions[1]
+            numCols = shape.dimensions[2]
+            numMatrices = shape.dimensions[0]
+        }
+        var lines = Array(repeating: "", count: numRows)
+        var index = 0
+        for matrix in 0..<numMatrices {
+            var line : String = "["
+            for row in 0..<numRows {
+                line += "["
+                for col in 0..<numCols {
+                    if (splitLastDimension) {
+                        index = row*numCols*numMatrices + col*numMatrices + matrix
+                    }
+                    else {
+                        index = matrix*numRows*numCols + row*numCols + col
+                    }
+                    let element = try getElement(index: index)
+                    let formattedNumber = String(format: "%\(elementWidth).\(precision)f", element)
+                    if (col > 0) { line += "," }
+                    line += formattedNumber
+                }
+                line += "]"
+                if (row == (numRows-1)) {
+                    line += "]  "
+                }
+                else {
+                    line += "   "
+                }
+                lines[row] += line
+                line = " "
+            }
+        }
+        
+        for row in 0..<numRows {
+            print(lines[row])
+        }
+    }
 }
 
 

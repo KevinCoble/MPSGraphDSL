@@ -1949,3 +1949,151 @@ public class OneHot : UnaryNode {
         return [result]
     }
 }
+
+///   Node to perform a dropout operation on a Tensor
+public class Dropout : UnaryNode {
+    let rate: Double
+    let rateTensor: String?
+    let useRateTensor: Bool
+
+    /// Create a dropout operation using a supplied rate
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - rate: The rate for the dropout (fraction of elements removed)
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, rate: Double, name: String? = nil) {
+        self.rate = rate
+        self.rateTensor = nil
+        useRateTensor = false
+        super.init(name: name)
+    }
+
+    /// Create a dropout operation with the  rate given by a tensor
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - rateTensor: The tensor that will suply the rate for the dropout (fraction of elements removed)
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, rateTensor: String? = nil, name: String? = nil) {
+        self.rate = 0
+        self.rateTensor = rateTensor
+        useRateTensor = true
+        super.init(name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+        
+        //  Add to the graph itself
+        let result: MPSGraphTensor
+        if (useRateTensor) {
+            let rateMPSTensor = try graph.getOptionalTensor(rateTensor)
+
+            result = graph.mpsgraph.dropout(inputTensor, rate: rateMPSTensor, name: graph.getFullName(name))
+       }
+        else {
+            result = graph.mpsgraph.dropout(inputTensor, rate: rate, name: graph.getFullName(name))
+        }
+        
+        //  Remember the output tensor and shape for later
+        return [result]
+    }
+}
+
+
+///   Node to perform a quantization operation on a floating Tensor, turning into a UInt8 or Int8
+public class Quantize : UnaryNode {
+    let scale: Double
+    let zeroPoint: Double
+    let signed: Bool
+    let scaleTensor: String?
+    let useScaleTensor: Bool
+    let zeroPointTensor: String?
+    let useZeroPointTensor: Bool
+    let axis: Int
+    
+    /// Initializer for a quantization operation - turning float tensor into byte tensor
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - scale: scale parameter:  result = (value / scale) + zeroPoint
+    ///   - zeroPoint: bias parameter:   result = (value / scale) + zeroPoint
+    ///   - signed: (Optional) If true a signed byte tensor is produces, else unsigned.  Default is false (UInt8)
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, scale: Double, zeroPoint: Double, signed: Bool = false, name: String? = nil) {
+        self.scale = scale
+        self.zeroPoint = zeroPoint
+        self.signed = signed
+        self.scaleTensor = nil
+        useScaleTensor = false
+        self.zeroPointTensor = nil
+        useZeroPointTensor = false
+        self.axis = 0
+        super.init(name: name)
+    }
+    
+    /// Initializer for a quantization operation - turning float tensor into byte tensor
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - scaleTensor: (Optional)  The name of the tensor that will provide the scale parameter:  result = (value / scale) + zeroPoint.  If nil the previous node's output will be used
+    ///   - zeroPoint: bias parameter:   result = (value / scale) + zeroPoint
+    ///   - signed: (Optional) If true a signed byte tensor is produces, else unsigned.  Default is false (UInt8)
+    ///   - axis: Axis on which the scale 1D value is being broadcasted
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, scaleTensor: String? = nil, zeroPoint: Double, signed: Bool = false, axis: Int, name: String? = nil) {
+        self.scale = 0.0
+        self.zeroPoint = zeroPoint
+        self.signed = signed
+        self.scaleTensor = scaleTensor
+        useScaleTensor = true
+        self.zeroPointTensor = nil
+        useZeroPointTensor = false
+        self.axis = axis
+        super.init(name: name)
+    }
+    
+    /// Initializer for a quantization operation - turning float tensor into byte tensor
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - scaleTensor: (Optional)  The name of the tensor that will provide the scale parameter:  result = (value / scale) + zeroPoint.  If nil the previous node's output will be used
+    ///   - zeroPointTensor: (Optional)  The name of the tensor that will provide the zero Point value.  bias parameter:   result = (value / scale) + zeroPoint.   If nil the previous node's output will be used
+    ///   - signed: (Optional) If true a signed byte tensor is produces, else unsigned.  Default is false (UInt8)
+    ///   - axis: Axis on which the scale 1D value is being broadcasted
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, scaleTensor: String? = nil, zeroPointTensor: String? = nil, signed: Bool = false, axis: Int, name: String? = nil) {
+        self.scale = 0.0
+        self.zeroPoint = 0.0
+        self.signed = signed
+        self.scaleTensor = scaleTensor
+        useScaleTensor = true
+        self.zeroPointTensor = zeroPointTensor
+        useZeroPointTensor = true
+        self.axis = axis
+        super.init(name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+        
+        //  Add to the graph itself
+        let result: MPSGraphTensor
+        if (useScaleTensor) {
+            let scaleMPSTensor = try graph.getOptionalTensor(scaleTensor)
+            if (useZeroPointTensor) {
+                let zeroPointMPSTensor = try graph.getOptionalTensor(zeroPointTensor)
+                result = graph.mpsgraph.quantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPointTensor: zeroPointMPSTensor, dataType: signed ? .int8 : .uInt8, axis: axis, name: graph.getFullName(name))
+
+            }
+            else {
+                result = graph.mpsgraph.quantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPoint: zeroPoint, dataType: signed ? .int8 : .uInt8, axis: axis, name: graph.getFullName(name))
+
+            }
+        }
+        else {
+            result = graph.mpsgraph.quantize(inputTensor, scale: scale, zeroPoint: zeroPoint, dataType: signed ? .int8 : .uInt8, name: graph.getFullName(name))
+        }
+        
+        //  Remember the output tensor and shape for later
+        return [result]
+    }
+}
