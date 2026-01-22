@@ -11,7 +11,7 @@ import MetalPerformanceShadersGraph
 
 ///   Type of the data elements in a tensor
 ///
-public enum DataType {
+public enum DataType: Sendable {
     ///  UInt8
     case uInt8
     //    case int8
@@ -37,6 +37,16 @@ public enum DataType {
             self = .float32
         default:
             self = .float32
+        }
+    }
+    
+    public func usableInGraph() -> Bool
+    {
+        switch (self) {
+        case .double:
+            return false
+        default:
+            return true
         }
 
     }

@@ -11,19 +11,19 @@ import Foundation
 @resultBuilder
 ///  The Result Builder for building deliniated text parsers
 public enum TextParserBuilder {
-    public static func buildBlock(_ dataChunks: [DataChunk]...) -> [DataChunk] {
+    public static func buildBlock(_ dataChunks: [DataChunkCreator]...) -> [DataChunkCreator] {
         return dataChunks.flatMap({$0})
     }
-    public static func buildExpression(_ expression: DelineatedTextChunk) -> [DataChunk] {
-        return [expression as! DataChunk]
+    public static func buildExpression(_ expression: DelineatedTextChunk) -> [DataChunkCreator] {
+        return [expression as! DataChunkCreator]
     }
-    public static func buildOptional(_ component: [DataChunk]?) -> [DataChunk] {
+    public static func buildOptional(_ component: [DataChunkCreator]?) -> [DataChunkCreator] {
         return component ?? []
     }
-    public static func buildEither(first component: [DataChunk]) -> [DataChunk] {
+    public static func buildEither(first component: [DataChunkCreator]) -> [DataChunkCreator] {
         return component
     }
-    public static func buildEither(second component: [DataChunk]) -> [DataChunk] {
+    public static func buildEither(second component: [DataChunkCreator]) -> [DataChunkCreator] {
         return component
     }
 }
@@ -43,7 +43,7 @@ public class DelineatedTextParser : DataParser {
     /// - Parameters:
     ///   - lineSeparator: The dilineator in the text that separates the items
     ///   - buildChunks: An array of DelineatedTextChunk chunks that determine how the items on the line will be processed
-    public init(lineSeparator: TextLineSeparator, @TextParserBuilder _ buildChunks: () -> [DataChunk]) {
+    public init(lineSeparator: TextLineSeparator, @TextParserBuilder _ buildChunks: () -> [DataChunkCreator]) {
         var format : DataFileFormat
         switch (lineSeparator) {
         case .CommaSeparated:
@@ -52,7 +52,7 @@ public class DelineatedTextParser : DataParser {
             format = .SpaceDelimited
         }
         super.init(dataFormat: format)
-        chunks = buildChunks()
+        chunks = buildChunks().map { $0.createDataChunk()}
     }
     
     fileprivate override init(dataFormat : DataFileFormat, chunks: [DataChunk], numSkipLines : Int, commentIndicators : [String]) {
@@ -74,13 +74,13 @@ public class DelineatedTextParser : DataParser {
     }
 }
 
-///  Protocol to mark a DataChunk subclass as includable in a delineated text data parser
+///  Protocol to mark a DataChunkCreator subclass as includable in a delineated text data parser
 public protocol DelineatedTextChunk {
     
 }
 
 ///  Delineated Text Parser chunk for a delineated string is thrown away
-public class UnusedTextString : DataChunk, DelineatedTextChunk {
+public class UnusedTextString : DataChunkCreator, DelineatedTextChunk {
     /// Create an UnusedTextString chunk for a DelineatedTextParser
     public init() {
         super.init(type: .Unused, length: 1, format: .fTextString, postProcessing: .None, affects: .neither)
@@ -88,7 +88,7 @@ public class UnusedTextString : DataChunk, DelineatedTextChunk {
 }
 
 ///  Delineated Text Parser chunk where the delineated string is assumed to be a class label for the input tensor
-public class LabelTextString : DataChunk, DelineatedTextChunk {
+public class LabelTextString : DataChunkCreator, DelineatedTextChunk {
     /// Create an LabelTextString chunk for a DelineatedTextParser
     public init() {
         super.init(type: .Label, length: 1, format: .fTextString, postProcessing: .None, affects: .input)
@@ -96,7 +96,7 @@ public class LabelTextString : DataChunk, DelineatedTextChunk {
 }
 
 ///  Delineated Text Parser chunk where the delineated string is taken as a class index integer and stored in the input tensor
-public class LabelIndexString : DataChunk, DelineatedTextChunk {
+public class LabelIndexString : DataChunkCreator, DelineatedTextChunk {
     /// Create an LabelIndexString chunk for a DelineatedTextParser
     public init() {
         super.init(type: .LabelIndex, length: 1, format: .fTextInt, postProcessing: .None, affects: .input)
@@ -104,7 +104,7 @@ public class LabelIndexString : DataChunk, DelineatedTextChunk {
 }
 
 ///  Delineated Text Parser chunk where the delineated string is taken as an integer and stored in the input tensor
-public class InputIntegerString : DataChunk, DelineatedTextChunk {
+public class InputIntegerString : DataChunkCreator, DelineatedTextChunk {
     /// Create an InputIntegerString chunk for a DelineatedTextParser
     /// - Parameter postProcessing: (Optional)  The processing for the value that will be done after the value is read, or in some cases all values are read and stored
     public init(postProcessing : PostReadProcessing = .None) {
@@ -113,7 +113,7 @@ public class InputIntegerString : DataChunk, DelineatedTextChunk {
 }
 
 ///  Delineated Text Parser chunk where the delineated string is taken as a floating value and stored in the input tensor
-public class InputFloatString : DataChunk, DelineatedTextChunk {
+public class InputFloatString : DataChunkCreator, DelineatedTextChunk {
     /// Create an InputFloatString chunk for a DelineatedTextParser
     /// - Parameter postProcessing: (Optional)  The processing for the value that will be done after the value is read, or in some cases all values are read and stored
     public init(postProcessing : PostReadProcessing = .None) {
@@ -122,7 +122,7 @@ public class InputFloatString : DataChunk, DelineatedTextChunk {
 }
 
 ///  Delineated Text Parser chunk where the delineated string is taken as an integer and stored in the output tensor
-public class OutputIntegerString : DataChunk, DelineatedTextChunk {
+public class OutputIntegerString : DataChunkCreator, DelineatedTextChunk {
     /// Create an OutputIntegerString chunk for a DelineatedTextParser
     /// - Parameter postProcessing: (Optional)  The processing for the value that will be done after the value is read, or in some cases all values are read and stored
     public init(postProcessing : PostReadProcessing = .None) {
@@ -131,7 +131,7 @@ public class OutputIntegerString : DataChunk, DelineatedTextChunk {
 }
 
 ///  Delineated Text Parser chunk where the delineated string is taken as an floating value and stored in the output tensor
-public class OutputFloatString : DataChunk, DelineatedTextChunk {
+public class OutputFloatString : DataChunkCreator, DelineatedTextChunk {
     /// Create an OutputFloatString chunk for a DelineatedTextParser
     /// - Parameter postProcessing: (Optional)  The processing for the value that will be done after the value is read, or in some cases all values are read and stored
     public init(postProcessing : PostReadProcessing = .None) {
@@ -140,7 +140,7 @@ public class OutputFloatString : DataChunk, DelineatedTextChunk {
 }
 
 ///  Delineated Text Parser chunk where the delineated string is assumed to be a class label for the output tensor
-public class OutputLabelString : DataChunk, DelineatedTextChunk {
+public class OutputLabelString : DataChunkCreator, DelineatedTextChunk {
     /// Create an OutputLabelString chunk for a DelineatedTextParser
     /// - Parameter postProcessing: (Optional)  The processing for the value that will be done after the value is read, or in some cases all values are read and stored
     public init(postProcessing : PostReadProcessing = .None) {
@@ -148,15 +148,15 @@ public class OutputLabelString : DataChunk, DelineatedTextChunk {
     }
 }
 
-///  Delineated Text Parser data chunk that allows you to have a repeating block of DataChunks, where a storage dimension can be updated at the end of each loop
-public class RepeatDimForDelineatedText : DataChunk, DelineatedTextChunk  {
+///  Delineated Text Parser data chunk that allows you to have a repeating block of DataChunkCreators, where a storage dimension can be updated at the end of each loop
+public class RepeatDimForDelineatedText : DataChunkCreator, DelineatedTextChunk  {
     /// Create a RepeatDimForDelineatedText chunk for a DelineatedTextParser
     /// - Parameters:
     ///   - count: The number of times the contents are executed with the storage location updated
     ///   - dimension: The storage location dimension that gets incremented
     ///   - affects: which Tensors storage location is modified, input, output, or both
-    public init(count: Int, dimension : ParserDimension, affects: SampleTensorAffect) {
-        super.init(type: .Repeat, length: count, format: dimension.getFormatType(), postProcessing: .None, affects: affects)
+    public init(count: Int, dimension : ParserDimension, affects: SampleTensorAffect, repeatChunks: [DataChunk]) {
+        super.init(type: .Repeat, length: count, format: dimension.getFormatType(), repeatChunks: repeatChunks, postProcessing: .None, affects: affects)
     }
     
     /// Initializer for RepeatDimForDelineatedText that takes a list of data chunks for processing the sample
@@ -165,9 +165,9 @@ public class RepeatDimForDelineatedText : DataChunk, DelineatedTextChunk  {
     ///   - dimension: The storage location dimension that gets incremented
     ///   - affects: which Tensors storage location is modified, input, output, or both
     ///   - repeatChunks: the delineated text chunks that get repeated
-    public convenience init(count: Int, dimension : ParserDimension, affects: SampleTensorAffect, @TextParserBuilder _ repeatChunks: () -> [DataChunk]) {
-        self.init(count: count, dimension : dimension, affects: affects)
-        self.repeatChunks = repeatChunks()
+    public convenience init(count: Int, dimension : ParserDimension, affects: SampleTensorAffect, @TextParserBuilder _ repeatChunks: () -> [DataChunkCreator]) {
+        let chunks = repeatChunks().map { $0.createDataChunk()}
+        self.init(count: count, dimension : dimension, affects: affects, repeatChunks: chunks)
     }
 }
 
@@ -176,19 +176,19 @@ public class RepeatDimForDelineatedText : DataChunk, DelineatedTextChunk  {
 @resultBuilder
 ///  The Result Builder for building fixed-column text parsers
 public enum FixedTextParserBuilder {
-    public static func buildBlock(_ dataChunks: [DataChunk]...) -> [DataChunk] {
+    public static func buildBlock(_ dataChunks: [DataChunkCreator]...) -> [DataChunkCreator] {
         return dataChunks.flatMap({$0})
     }
-    public static func buildExpression(_ expression: FixedColumnChunk) -> [DataChunk] {
-        return [expression as! DataChunk]
+    public static func buildExpression(_ expression: FixedColumnChunk) -> [DataChunkCreator] {
+        return [expression as! DataChunkCreator]
     }
-    public static func buildOptional(_ component: [DataChunk]?) -> [DataChunk] {
+    public static func buildOptional(_ component: [DataChunkCreator]?) -> [DataChunkCreator] {
         return component ?? []
     }
-    public static func buildEither(first component: [DataChunk]) -> [DataChunk] {
+    public static func buildEither(first component: [DataChunkCreator]) -> [DataChunkCreator] {
         return component
     }
-    public static func buildEither(second component: [DataChunk]) -> [DataChunk] {
+    public static func buildEither(second component: [DataChunkCreator]) -> [DataChunkCreator] {
         return component
     }
 }
@@ -197,9 +197,9 @@ public enum FixedTextParserBuilder {
 public class FixedColumnTextParser : DataParser {
     /// Initializer for a FixedColumnTextParser with the result builder providing data chunks for line processing
     ///   - buildChunks: An array of FixedColumnChunk chunks that determine how the items on the line will be processed
-    public init(@FixedTextParserBuilder _ buildChunks: () -> [DataChunk]) {
+    public init(@FixedTextParserBuilder _ buildChunks: () -> [DataChunkCreator]) {
         super.init(dataFormat: .FixedColumns)
-        chunks = buildChunks()
+        chunks = buildChunks().map { $0.createDataChunk()}
     }
     
     fileprivate override init(dataFormat : DataFileFormat, chunks: [DataChunk], numSkipLines : Int, commentIndicators : [String]) {
@@ -221,14 +221,14 @@ public class FixedColumnTextParser : DataParser {
     }
 }
 
-///  Protocol to mark a DataChunk class as includable in a fixed column text data parser
+///  Protocol to mark a DataChunkCreator class as includable in a fixed column text data parser
 public protocol FixedColumnChunk {
     
 }
 
 
 ///  Fixed-Column Text Parser chunk for a specified amount of columns to be thrown away
-public class UnusedTextColumns : DataChunk, FixedColumnChunk {
+public class UnusedTextColumns : DataChunkCreator, FixedColumnChunk {
     /// Create an UnusedTextColumns chunk for a FixedColumnTextParser
     /// - Parameter numCharacters: The number of columns to be parsed by this chunk (size of data item)
     public init(numCharacters : Int) {
@@ -237,7 +237,7 @@ public class UnusedTextColumns : DataChunk, FixedColumnChunk {
 }
 
 ///  Fixed-Column Text Parser chunk where the fixed-column string is assumed to be a class label for the input tensor
-public class LabelTextColumns : DataChunk, FixedColumnChunk {
+public class LabelTextColumns : DataChunkCreator, FixedColumnChunk {
     /// reate an LabelTextColumns chunk for a FixedColumnTextParser
     /// - Parameter numCharacters: The number of columns to be parsed by this chunk (size of data item)
     public init(numCharacters : Int) {
@@ -246,7 +246,7 @@ public class LabelTextColumns : DataChunk, FixedColumnChunk {
 }
 
 ///  Fixed-Column Text Parser chunk where the fixed-column string is taken as a class index integer and stored in the input tensor
-public class LabelIndexColumns : DataChunk, FixedColumnChunk {
+public class LabelIndexColumns : DataChunkCreator, FixedColumnChunk {
     /// Create an LabelIndexColumns chunk for a FixedColumnTextParser
     /// - Parameter numCharacters: The number of columns to be parsed by this chunk (size of data item)
     public init(numCharacters : Int) {
@@ -255,7 +255,7 @@ public class LabelIndexColumns : DataChunk, FixedColumnChunk {
 }
 
 ///  Fixed-Column Text Parser chunk where the fixed-column string is taken as an integer and stored in the input tensor
-public class InputIntegerColumns : DataChunk, FixedColumnChunk {
+public class InputIntegerColumns : DataChunkCreator, FixedColumnChunk {
     /// Create an InputIntegerColumns chunk for a FixedColumnTextParser
     /// - Parameters:
     ///   - numCharacters: The number of columns to be parsed by this chunk (size of data item)
@@ -266,7 +266,7 @@ public class InputIntegerColumns : DataChunk, FixedColumnChunk {
 }
 
 ///  Fixed-Column Text Parser chunk where the fixed-column string is taken as a floating value and stored in the input tensor
-public class InputFloatColumns : DataChunk, FixedColumnChunk {
+public class InputFloatColumns : DataChunkCreator, FixedColumnChunk {
     /// Create an InputFloatColumns chunk for a FixedColumnTextParser
     /// - Parameters:
     ///   - numCharacters: The number of columns to be parsed by this chunk (size of data item)
@@ -277,7 +277,7 @@ public class InputFloatColumns : DataChunk, FixedColumnChunk {
 }
 
 ///  Fixed-Column Text Parser chunk where the fixed-column string is taken as an integer and stored in the output tensor
-public class OutputIntegerColumns : DataChunk, FixedColumnChunk {
+public class OutputIntegerColumns : DataChunkCreator, FixedColumnChunk {
     /// Create an OutputIntegerColumns chunk for a FixedColumnTextParser
     /// - Parameters:
     ///   - numCharacters: The number of columns to be parsed by this chunk (size of data item)
@@ -288,7 +288,7 @@ public class OutputIntegerColumns : DataChunk, FixedColumnChunk {
 }
 
 ///  Fixed-Column Text Parser chunk where the fixed-column string is taken as a floating value and stored in the output tensor
-public class OutputFloatColumns : DataChunk, FixedColumnChunk {
+public class OutputFloatColumns : DataChunkCreator, FixedColumnChunk {
     /// Create an OutputFloatColumns chunk for a FixedColumnTextParser
     /// - Parameters:
     ///   - numCharacters: The number of columns to be parsed by this chunk (size of data item)
@@ -299,7 +299,7 @@ public class OutputFloatColumns : DataChunk, FixedColumnChunk {
 }
 
 ///  Fixed-Column Text Parser chunk where the fixed-column string is assumed to be a class label for the output tensor
-public class OutputLabelColumns : DataChunk, FixedColumnChunk {
+public class OutputLabelColumns : DataChunkCreator, FixedColumnChunk {
     /// Create an OutputLabelColumns chunk for a FixedColumnTextParser
     /// - Parameters:
     ///   - numCharacters: The number of columns to be parsed by this chunk (size of data item)
@@ -309,15 +309,15 @@ public class OutputLabelColumns : DataChunk, FixedColumnChunk {
     }
 }
 
-///  Fixed-Column  Text Parser data chunk that allows you to have a repeating block of DataChunks, where a storage dimension can be updated at the end of each loop
-public class RepeatDimForFixedText : DataChunk, FixedColumnChunk  {
+///  Fixed-Column  Text Parser data chunk that allows you to have a repeating block of DataChunkCreators, where a storage dimension can be updated at the end of each loop
+public class RepeatDimForFixedText : DataChunkCreator, FixedColumnChunk  {
     /// Create an RepeatDimForFixedText chunk for a FixedColumnTextParser
     /// - Parameters:
     ///   - count: The number of times the contents are executed with the storage location updated
     ///   - dimension: The storage location dimension that gets incremented
     ///   - affects: which Tensors storage location is modified, input, output, or both
-    public init(count: Int, dimension : ParserDimension, affects: SampleTensorAffect) {
-        super.init(type: .Repeat, length: count, format: dimension.getFormatType(), postProcessing: .None, affects: affects)
+    public init(count: Int, dimension : ParserDimension, affects: SampleTensorAffect, repeatChunks: [DataChunk]) {
+        super.init(type: .Repeat, length: count, format: dimension.getFormatType(), repeatChunks: repeatChunks, postProcessing: .None, affects: affects)
     }
     
     /// Initializer for RepeatDimForFixedText that takes a list of data chunks for processing the sample
@@ -326,8 +326,8 @@ public class RepeatDimForFixedText : DataChunk, FixedColumnChunk  {
     ///   - dimension: The storage location dimension that gets incremented
     ///   - affects: which Tensors storage location is modified, input, output, or both
     ///   - repeatChunks: the fixed-column text chunks that get repeated
-    public convenience init(count: Int, dimension : ParserDimension, affects: SampleTensorAffect, @FixedTextParserBuilder _ repeatChunks: () -> [DataChunk]) {
-        self.init(count: count, dimension : dimension, affects: affects)
-        self.repeatChunks = repeatChunks()
+    public convenience init(count: Int, dimension : ParserDimension, affects: SampleTensorAffect, @FixedTextParserBuilder _ repeatChunks: () -> [DataChunkCreator]) {
+        let chunks = repeatChunks().map { $0.createDataChunk()}
+        self.init(count: count, dimension : dimension, affects: affects, repeatChunks: chunks)
     }
 }

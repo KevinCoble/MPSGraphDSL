@@ -27,6 +27,8 @@ public enum GenericMPSGraphDSLErrors : Error {
     case NotEnoughValues
     ///  Internal error - should not be seen outside of public calls
     case InternalError
+    ///  The data type passed in is not usable by MPSGraph
+    case TypeNotUsableByGraph
 }
 
 
@@ -40,6 +42,10 @@ public enum DataSetErrors : Error {
     case SampleInputTypeMismatch
     /// A passed in sample has an output type that does not match the DataSet
     case SampleOutputTypeMismatch
+    /// The DataSet is in use by a Graph doing a run and cannot be modified.
+    case InUseByGraph
+    /// Attempt to unlock a DataSet that was not locked.
+    case NotLocked
 }
 
 /// Errors that can be thrown by the data parsing system
@@ -64,6 +70,8 @@ public enum DataParsingErrors : Error {
     case ReferencedDataTensorNotFound(String)
     ///  The number of unique labels exceed the output dimension
     case MoreUniqueLabelsThanOutputDimension
+    ///   The parser tried to put a nil sample into the dataset.  Usually an internal error
+    case AttemptToPutNilSampleInDataSet
 }
 
 ///  Errors that can be thrown by the MPSGraph building system

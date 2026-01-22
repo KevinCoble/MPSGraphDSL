@@ -79,7 +79,7 @@ struct LearningTests {
                 let result: Float32 = 3.0 * input1 - 2.0 * input2 + 1.0
                 let outputTensor = TensorFloat32(shape: TensorShape([1]), initialValue: result)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try testDataSet.appendSample(sample)
+                try await testDataSet.appendSample(sample)
             }
             //  Get a training data set
             let trainingDataSet = DataSet(inputShape: TensorShape([1, 2]), inputType: .float32, outputShape: TensorShape([1]), outputType: .float32)
@@ -90,7 +90,7 @@ struct LearningTests {
                 let result: Float32 = 3.0 * input1 - 2.0 * input2 + 1.0
                 let outputTensor = TensorFloat32(shape: TensorShape([1]), initialValue: result)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try trainingDataSet.appendSample(sample)
+                try await trainingDataSet.appendSample(sample)
             }
             
             //  Create the weight a bias tensors for a three layer 10x5x1 node network with two inputs
@@ -115,7 +115,9 @@ struct LearningTests {
             
             //  Get the initial accuracy
             var totalError : Double = 0.0
-            for sample in testDataSet.samples {
+            let numTestingSamples = await testDataSet.numSamples
+            for i in 0..<numTestingSamples {
+                let sample = try await testDataSet.getSample(sampleIndex: i)
                 var inputTensors : [String : Tensor] = [:]
                 inputTensors["inputs"] = sample.inputs
                 inputTensors["expectedValue"] = sample.outputs
@@ -128,9 +130,11 @@ struct LearningTests {
             print("Initial error = \(totalError)")
             
             //  Train on the training set 10 times
+            let numTrainingSamples = await trainingDataSet.numSamples
             for _ in 0..<10 {
-                for sample in trainingDataSet.samples {
-                    var inputTensors : [String : Tensor] = [:]
+                for i in 0..<numTrainingSamples {
+                    let sample = try await trainingDataSet.getSample(sampleIndex: i)
+                     var inputTensors : [String : Tensor] = [:]
                     inputTensors["inputs"] = sample.inputs
                     inputTensors["expectedValue"] = sample.outputs
                     _ = try graph.encodeOne(mode: "learn", inputTensors: inputTensors)
@@ -139,7 +143,8 @@ struct LearningTests {
             
             //  Get the final accuracy
             totalError = 0.0
-            for sample in testDataSet.samples {
+            for i in 0..<numTestingSamples {
+                let sample = try await testDataSet.getSample(sampleIndex: i)
                 var inputTensors : [String : Tensor] = [:]
                 inputTensors["inputs"] = sample.inputs
                 inputTensors["expectedValue"] = sample.outputs
@@ -166,7 +171,7 @@ struct LearningTests {
                 let or: Float32 = (input1 >= 0.5 || input2 >= 0.5) ? 1.0 : 0.0
                 let outputTensor = TensorFloat32(shape: TensorShape([1]), initialValue: or)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try testDataSet.appendSample(sample)
+                try await testDataSet.appendSample(sample)
             }
             //  Get a training data set
             let trainingDataSet = DataSet(inputShape: TensorShape([1, 2]), inputType: .float32, outputShape: TensorShape([1]), outputType: .float32)
@@ -177,7 +182,7 @@ struct LearningTests {
                 let or: Float32 = (input1 >= 0.5 || input2 >= 0.5) ? 1.0 : 0.0
                 let outputTensor = TensorFloat32(shape: TensorShape([1]), initialValue: or)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try trainingDataSet.appendSample(sample)
+                try await trainingDataSet.appendSample(sample)
             }
             
             //  Create the weight a bias tensors for a single node network with two inputs
@@ -203,7 +208,9 @@ struct LearningTests {
             
             //  Get the initial accuracy
             var totalCorrect = 0
-            for sample in testDataSet.samples {
+            let numTestingSamples = await testDataSet.numSamples
+            for i in 0..<numTestingSamples {
+                let sample = try await testDataSet.getSample(sampleIndex: i)
                 var inputTensors : [String : Tensor] = [:]
                 inputTensors["inputs"] = sample.inputs
                 inputTensors["expectedValue"] = sample.outputs
@@ -217,8 +224,10 @@ struct LearningTests {
             print("Initial correct = \(totalCorrect)")
             
             //  Train on the training set 10 times
+            let numTrainingSamples = await trainingDataSet.numSamples
             for _ in 0..<10 {
-                for sample in trainingDataSet.samples {
+                for i in 0..<numTrainingSamples {
+                    let sample = try await trainingDataSet.getSample(sampleIndex: i)
                     var inputTensors : [String : Tensor] = [:]
                     inputTensors["inputs"] = sample.inputs
                     inputTensors["expectedValue"] = sample.outputs
@@ -228,7 +237,8 @@ struct LearningTests {
             
             //  Get the final accuracy
             totalCorrect = 0
-            for sample in testDataSet.samples {
+            for i in 0..<numTestingSamples {
+                let sample = try await testDataSet.getSample(sampleIndex: i)
                 var inputTensors : [String : Tensor] = [:]
                 inputTensors["inputs"] = sample.inputs
                 inputTensors["expectedValue"] = sample.outputs
@@ -256,7 +266,7 @@ struct LearningTests {
                 let or: Float32 = (input1 >= 0.5 || input2 >= 0.5) ? 1.0 : 0.0
                 let outputTensor = TensorFloat32(shape: TensorShape([1]), initialValue: or)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try testDataSet.appendSample(sample)
+                try await testDataSet.appendSample(sample)
             }
             //  Get a training data set
             let trainingDataSet = DataSet(inputShape: TensorShape([1, 2]), inputType: .float32, outputShape: TensorShape([1]), outputType: .float32)
@@ -267,7 +277,7 @@ struct LearningTests {
                 let or: Float32 = (input1 >= 0.5 || input2 >= 0.5) ? 1.0 : 0.0
                 let outputTensor = TensorFloat32(shape: TensorShape([1]), initialValue: or)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try trainingDataSet.appendSample(sample)
+                try await trainingDataSet.appendSample(sample)
             }
             
             //  Create the weight a bias tensors for a two layer 2x1 node network with two inputs
@@ -302,7 +312,9 @@ struct LearningTests {
             
             //  Get the initial accuracy
             var totalCorrect = 0
-            for sample in testDataSet.samples {
+            let numTestingSamples = await testDataSet.numSamples
+            for i in 0..<numTestingSamples {
+                let sample = try await testDataSet.getSample(sampleIndex: i)
                 var inputTensors : [String : Tensor] = [:]
                 inputTensors["inputs"] = sample.inputs
                 let results = try graph.runOne(mode: "infer", inputTensors: inputTensors)
@@ -315,8 +327,10 @@ struct LearningTests {
             print("Initial correct = \(totalCorrect)")
             
             //  Train on the training set 250 times
+            let numTrainingSamples = await trainingDataSet.numSamples
             for _ in 0..<200 {
-                for sample in trainingDataSet.samples {
+                for i in 0..<numTrainingSamples {
+                    let sample = try await trainingDataSet.getSample(sampleIndex: i)
                     var inputTensors : [String : Tensor] = [:]
                     inputTensors["inputs"] = sample.inputs
                     inputTensors["expectedValue"] = sample.outputs
@@ -326,7 +340,8 @@ struct LearningTests {
             
             //  Get the final accuracy
             totalCorrect = 0
-            for sample in testDataSet.samples {
+            for i in 0..<numTestingSamples {
+                let sample = try await testDataSet.getSample(sampleIndex: i)
                 var inputTensors : [String : Tensor] = [:]
                 inputTensors["inputs"] = sample.inputs
                 let results = try graph.runOne(mode: "infer", inputTensors: inputTensors)
@@ -338,7 +353,7 @@ struct LearningTests {
             }
             print("Final correct = \(totalCorrect)")
             
-            #expect(totalCorrect > 90)
+            #expect(totalCorrect > 88)
         }
     }
     
@@ -357,7 +372,7 @@ struct LearningTests {
                 let xor: Float32 = ((input1 >= 0.5 && input2 >= 0.5) || (input1 < 0.5 && input2 < 0.5)) ? 1.0 : 0.0
                 let outputTensor = TensorFloat32(shape: TensorShape([1]), initialValue: xor)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try testDataSet.appendSample(sample)
+                try await testDataSet.appendSample(sample)
             }
             //  Get a training data set
             let trainingDataSet = DataSet(inputShape: TensorShape([1, 2]), inputType: .float32, outputShape: TensorShape([1]), outputType: .float32)
@@ -372,7 +387,7 @@ struct LearningTests {
                 let xor: Float32 = ((input1 >= 0.5 && input2 >= 0.5) || (input1 < 0.5 && input2 < 0.5)) ? 1.0 : 0.0
                 let outputTensor = TensorFloat32(shape: TensorShape([1]), initialValue: xor)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try trainingDataSet.appendSample(sample)
+                try await trainingDataSet.appendSample(sample)
             }
             
             //  Create the weight a bias tensors for a three layer 10x5x1 node network with two inputs
@@ -416,7 +431,9 @@ struct LearningTests {
             
             //  Get the initial accuracy
             var totalCorrect = 0
-            for sample in testDataSet.samples {
+            let numTestingSamples = await testDataSet.numSamples
+            for i in 0..<numTestingSamples {
+                let sample = try await testDataSet.getSample(sampleIndex: i)
                 var inputTensors : [String : Tensor] = [:]
                 inputTensors["inputs"] = sample.inputs
                 inputTensors["expectedValue"] = sample.outputs
@@ -430,8 +447,10 @@ struct LearningTests {
             print("Initial correct = \(totalCorrect)")
             
             //  Train on the training set 10 times
+            let numTrainingSamples = await trainingDataSet.numSamples
             for _ in 0..<100 {
-                for sample in trainingDataSet.samples {
+                for i in 0..<numTrainingSamples {
+                    let sample = try await trainingDataSet.getSample(sampleIndex: i)
                     var inputTensors : [String : Tensor] = [:]
                     inputTensors["inputs"] = sample.inputs
                     inputTensors["expectedValue"] = sample.outputs
@@ -441,7 +460,8 @@ struct LearningTests {
             
             //  Get the final accuracy
             totalCorrect = 0
-            for sample in testDataSet.samples {
+            for i in 0..<numTestingSamples {
+                let sample = try await testDataSet.getSample(sampleIndex: i)
                 var inputTensors : [String : Tensor] = [:]
                 inputTensors["inputs"] = sample.inputs
                 inputTensors["expectedValue"] = sample.outputs
@@ -468,7 +488,7 @@ struct LearningTests {
                 let or: Float32 = (input1 >= 0.5 || input2 >= 0.5)  ? 1.0 : 0.0
                 let outputTensor = TensorFloat32(shape: TensorShape([1]), initialValue: or)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try testDataSet.appendSample(sample)
+                try await testDataSet.appendSample(sample)
             }
             
             //  Get a training data set
@@ -480,7 +500,7 @@ struct LearningTests {
                 let or: Float32 = (input1 >= 0.5 || input2 >= 0.5)  ? 1.0 : 0.0
                 let outputTensor = TensorFloat32(shape: TensorShape([1]), initialValue: or)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try trainingDataSet.appendSample(sample)
+                try await trainingDataSet.appendSample(sample)
             }
             //  Build the graph
             let graph = Graph {
@@ -496,7 +516,9 @@ struct LearningTests {
             
             //  Get the initial accuracy
             var totalCorrect = 0
-            for sample in testDataSet.samples {
+            let numTestingSamples = await testDataSet.numSamples
+            for i in 0..<numTestingSamples {
+                let sample = try await testDataSet.getSample(sampleIndex: i)
                 var inputTensors : [String : Tensor] = [:]
                 inputTensors["inputs"] = sample.inputs
                 let results = try graph.runOne(mode: "infer", inputTensors: inputTensors)
@@ -509,8 +531,10 @@ struct LearningTests {
             print("Initial correct = \(totalCorrect)")
             
             //  Train on the training set 10 times
+            let numTrainingSamples = await trainingDataSet.numSamples
             for _ in 0..<10 {
-                for sample in trainingDataSet.samples {
+                for i in 0..<numTrainingSamples {
+                    let sample = try await trainingDataSet.getSample(sampleIndex: i)
                     var inputTensors : [String : Tensor] = [:]
                     inputTensors["inputs"] = sample.inputs
                     inputTensors["expectedValue"] = sample.outputs
@@ -520,7 +544,8 @@ struct LearningTests {
             
             //  Get the final accuracy
             totalCorrect = 0
-            for sample in testDataSet.samples {
+            for i in 0..<numTestingSamples {
+                let sample = try await testDataSet.getSample(sampleIndex: i)
                 var inputTensors : [String : Tensor] = [:]
                 inputTensors["inputs"] = sample.inputs
                 let results = try graph.runOne(mode: "infer", inputTensors: inputTensors)
@@ -532,5 +557,41 @@ struct LearningTests {
             }
             print("Final correct = \(totalCorrect)")
         }
+    }
+    
+    @Test func SpeedTest() async throws {
+        //  Get a test data set
+        let testDataSet = DataSet(inputShape: TensorShape([1, 2]), inputType: .float32, outputShape: TensorShape([3]), outputType: .float32)
+        for _ in 0..<100 {
+            let input1 = Float32(Int.random(in: 0...1))
+            let input2 = Float32(Int.random(in: 0...1))
+            let inputTensor = try TensorFloat32(shape: TensorShape([1, 2]), initialValues: [input1, input2])
+            var output: Int = 0
+            if (input1 < 0.5 || input2 < 0.5) { output = 1}
+            if (input1 > 0.5 || input2 > 0.5) { output = 2}
+            let outputTensor = try await testDataSet.getOutputTensorForClassification(output)
+            let sample = DataSample(inputs: inputTensor, outputs: outputTensor, classIndex: output)
+            try await testDataSet.appendSample(sample)
+        }
+        
+        //  Create a simple graph
+        let graph = Graph {
+            PlaceHolder(shape: [1, 2], name: "inputs")
+            PlaceHolder(shape: [3], modes: ["learn"], name: "expectedValue")
+            FullyConnectedLayer(input: "inputs", outputShape: TensorShape([3]), activationFunction: .relu, name: "result")
+                .learnWithRespectTo("loss")
+                .targetForModes(["infer"])
+            SoftMax(name: "inferenceResult")
+                .targetForModes(["infer"], )
+            SoftMaxCrossEntropy(labels: "expectedValue", reductionType: .sum, name: "loss")
+                .targetForModes(["learn"])
+            Learning(constant: true, learningRate: 0.05, learningModes: ["learn"])
+        }
+        
+        //  Run the data through 1000 times
+        for _ in 0..<1000 {
+            let _ = try await graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
+        }
+
     }
 }

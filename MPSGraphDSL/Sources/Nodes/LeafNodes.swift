@@ -318,23 +318,23 @@ public class Variable : Node {
         return [variable]
     }
     
-    internal func getResetData(forGraph: Graph) -> MPSGraphTensorData? {
+    internal func getResetData(forGraph: Graph) throws -> MPSGraphTensorData? {
         switch (valueSource) {
         case .tensor(let sourceTensor):
-            return sourceTensor.getMPSGraphTensorData(forGraph: forGraph)
+            return try sourceTensor.getMPSGraphTensorData(forGraph: forGraph)
         case .tensorReference:
             if let referenceTensor = referenceTensor {
-                return referenceTensor.getMPSGraphTensorData(forGraph: forGraph)
+                return try referenceTensor.getMPSGraphTensorData(forGraph: forGraph)
             }
             else {
                 return nil
             }
         case .randomValues(let range):
             let tensor = CreateTensor.randomValues(type: dataType!, shape: shape!, range: range)
-            return tensor.getMPSGraphTensorData(forGraph: forGraph)
+            return try tensor.getMPSGraphTensorData(forGraph: forGraph)
         case .constant(let value):
             let tensor = CreateTensor.constantValues(type: dataType!, shape: shape!, initialValue: value)
-            return tensor.getMPSGraphTensorData(forGraph: forGraph)
+            return try tensor.getMPSGraphTensorData(forGraph: forGraph)
         case .inputTensor:
             return nil
         }

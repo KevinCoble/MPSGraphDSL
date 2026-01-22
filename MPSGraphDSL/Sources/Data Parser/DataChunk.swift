@@ -9,7 +9,7 @@ import Foundation
 
 
 ///   Enumeration for the DataParserChunk Type
-internal enum DataChunkType : Int {
+internal enum DataChunkType : Int, Sendable  {
     ///  Data in chunk is unused
     case Unused = 1
     ///  Data in chunk is a classification label
@@ -67,7 +67,7 @@ internal enum DataChunkType : Int {
 }
 
 ///  Enumeration for the data type read by a chunk
-public enum DataFormatType : Int {
+public enum DataFormatType : Int, Sendable {
     ///  Signed bytes
     case fInt8 = 1
     ///  Unsigned bytes
@@ -196,7 +196,7 @@ public enum DataFormatType : Int {
     }
 
     ///  Gets the byte length of a single format type item
-    public var byteLength : Int
+    public var byteLength : Int?
     {
         get {
             switch (self)
@@ -224,7 +224,7 @@ public enum DataFormatType : Int {
             case .fDouble:
                 return MemoryLayout<Double>.size
             case .fTextString, .fTextInt, .fTextFloat:
-                return 1
+                return nil       //  Indeterminate
             case .rDimension0, .rDimension1, .rDimension2, .rDimension3, .rDimension4, .rDimension5, .rDimension6, .rDimension7, .rDimension8,
                  .rDimension9, .rDimension10, .rDimension11, .rDimension12, .rDimension13, .rDimension14, .rDimension15, .rSample:
                 return 0
@@ -235,7 +235,7 @@ public enum DataFormatType : Int {
 
 
 ///  Enumeration for the post-processing performed by the parser on the chunk data
-public enum PostReadProcessing : Int {
+public enum PostReadProcessing : Int, Sendable  {
     ///  No post-processing performed
     case None = 1
     ///  Each value is scaled to be between 0 an 1, based on format type value range
@@ -277,7 +277,7 @@ public enum PostReadProcessing : Int {
 }
 
 ///  Enumeration for the color channel indices (assumed to be dimension 3)
-public enum ColorChannel : Int {
+public enum ColorChannel : Int, Sendable  {
     case red = 0
     case green = 1
     case blue = 2
@@ -303,7 +303,7 @@ public enum ColorChannel : Int {
 }
 
 ///  Enumeration to select which tensor dimensions are affected by repeat, setDimension, IncrementDimension, etc. parser chunks
-public enum SampleTensorAffect {
+public enum SampleTensorAffect: Sendable  {
     case neither
     case input
     case output
@@ -312,34 +312,60 @@ public enum SampleTensorAffect {
 
 
 
-public class DataChunk {
+public struct DataChunk : Sendable {
     let type : DataChunkType
-    var length : Int
+    let length : Int
     let format : DataFormatType
-    var repeatChunks : [DataChunk]?     //  If a repeating chunk, these are the chunks to repeat
+    let repeatChunks : [DataChunk]?     //  If a repeating chunk, these are the chunks to repeat
     let postProcessing : PostReadProcessing
     let tensorAffect: SampleTensorAffect
     
     internal var normalizationIndex : Int?
     
-    init(type: DataChunkType, length: Int, format : DataFormatType, postProcessing : PostReadProcessing, affects: SampleTensorAffect)
+    init(type: DataChunkType, length: Int, format : DataFormatType, repeatChunks: [DataChunk]?, postProcessing : PostReadProcessing, affects: SampleTensorAffect)
     {
         self.type = type
         self.length = length
         self.format = format
-        self.repeatChunks = nil
+        self.repeatChunks = repeatChunks
         self.postProcessing = postProcessing
         self.tensorAffect = affects
+    }
+    
+    //  Get the bytes required by the chunk (binary parsing use).  Return nil if indeterminate
+    func getRequiredBytes() -> Int?
+    {
+        if let repeatChunks = repeatChunks {
+            //  Get the length of the repeat chunks
+            var totalByteLength = 0
+            for chunk in repeatChunks {
+                let byteLength = chunk.getRequiredBytes()
+                if byteLength == nil { return nil }
+                totalByteLength += byteLength!
+            }
+            if (format == .rSample) {
+                return totalByteLength
+            }
+            else {
+                return totalByteLength * length
+            }
+        }
+        else {
+            let dataByteLength = format.byteLength
+            if dataByteLength == nil { return nil }
+            let byteLength = dataByteLength! * length
+            return byteLength
+        }
     }
 
     
     // MARK: - Parsing
-    func parseBinaryChunk(dataSet: DataSet, inputFile : InputStream, parsingData : ParsingData) throws
+    func parseBinaryChunk(dataSet: DataSet, inputFile : InputStream, parsingData : ParsingData) async throws
     {
         //  Get the data for the types that can use it
         var data : [Double]?
-        if (type != .Unused && type != .OutputLabel && type != .Repeat && type != .SetDimension) {
-            data = readBinaryData(inputFile : inputFile, dataSet: dataSet)
+        if (type != .OutputLabel && type != .Repeat && type != .SetDimension) {
+            data = await readBinaryData(inputFile : inputFile, dataSet: dataSet)
             if (data == nil) {
                 throw DataParsingErrors.ErrorReadingBinaryData
             }
@@ -352,25 +378,26 @@ public class DataChunk {
             return
         case .Label, .LabelIndex:
             //  Store the label for this data set
-            try dataSet.appendOutputClass(Int(data![0]), parsingData: parsingData)
+            try await parsingData.appendOutputClass(Int(data![0]))
         case .Feature:
             //  Store the feature values for the current input location
-            try dataSet.appendInputData(data!, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendInputData(data!, normalizationIndex: normalizationIndex)
         case .RedValue:
             //  Store the red values for the current input location
-            try dataSet.appendColorData(data!, channel: .red, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendColorData(data!, channel: .red, normalizationIndex: normalizationIndex)
         case .GreenValue:
             //  Store the green values for the current input location
-            try dataSet.appendColorData(data!, channel: .green, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendColorData(data!, channel: .green, normalizationIndex: normalizationIndex)
         case .BlueValue:
             //  Store the blue values for the current input location
-            try dataSet.appendColorData(data!, channel: .blue, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendColorData(data!, channel: .blue, normalizationIndex: normalizationIndex)
         case .OutputValues:
             //  Store the output values for the current output location
-            try dataSet.appendOutputData(data!, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendOutputData(data!, normalizationIndex: normalizationIndex)
         case .OutputLabel:
             if let string = readBinaryString(inputFile: inputFile, dataSet: dataSet) {
-                try dataSet.appendOutputLabel(string, normalizationIndex: normalizationIndex, parsingData: parsingData)
+                let labelIndex = await dataSet.getLabelIndex(label: string)
+                try await parsingData.appendOutputLabel(labelIndex, normalizationIndex: normalizationIndex)
             }
             else {
                 throw DataParsingErrors.ErrorReadingBinaryData
@@ -382,21 +409,22 @@ public class DataChunk {
             for _ in 0..<length {
                 //  If a sample iterator, increment up front so new sample can be created when needed
                 if (format == .rSample) {
-                    dataSet.incrementSample(parsingData: parsingData)
+                    let sampleIndex = try await dataSet.incrementIndexAppendEmptySample(oldIndex: parsingData.currentSampleIndex)
+                    try await parsingData.getSampleFromDataSet(sampleIndex: sampleIndex, dataSet : dataSet)
                 }
                 //  Process each chunk
                 for chunk in repeatChunks! {
                     do {
-                        try chunk.parseBinaryChunk(dataSet: dataSet, inputFile : inputFile, parsingData: parsingData)
+                        try await chunk.parseBinaryChunk(dataSet: dataSet, inputFile : inputFile, parsingData: parsingData)
                     }
                     catch DataParsingErrors.ErrorReadingBinaryData {
                         //  If a sample repeat, and and the current location is 0, delete last (empty) sample and return true - we are done
                         if (format == .rSample) {
-                            let inputSum = parsingData.currentInputLocation.reduce(0, +)
-                            let outputSum = parsingData.currentOutputLocation.reduce(0, +)
+                            let inputSum = await parsingData.currentInputLocation.reduce(0, +)
+                            let outputSum = await parsingData.currentOutputLocation.reduce(0, +)
                             if (inputSum == 0 && outputSum == 0) {
-                                dataSet.samples.removeLast()
-                                parsingData.currentSample -= 1
+                                try await dataSet.removeFinalSample()
+                                await parsingData.dropCurrentSample()
                             }
                             return
                         }
@@ -410,53 +438,54 @@ public class DataChunk {
                 //  Increment the dimension
                 if (format != .rSample) {
                     if (tensorAffect == .input || tensorAffect == .both) {
-                        if (dimension < parsingData.currentInputLocation.count) { parsingData.currentInputLocation[dimension] += 1 }
+                        await parsingData.incrementInputDimension(dimension: dimension)
                     }
                     if (tensorAffect == .output || tensorAffect == .both) {
-                        if (dimension < parsingData.currentOutputLocation.count) { parsingData.currentOutputLocation[dimension] += 1 }
-                    }
+                        await parsingData.incrementOutputDimension(dimension: dimension)
+                     }
+                }
+                else {
+                    //  Sample repeat - put the sample back
+                    try await parsingData.putSampleBackIntoDataSet(dataSet: dataSet)
                 }
            }
         case .SetDimension:
             if (format == .rSample) {
+                try await parsingData.putSampleBackIntoDataSet(dataSet: dataSet)
                 if (length < 0) {
-                    dataSet.incrementSample(parsingData: parsingData)
+                    let sampleIndex = try await dataSet.appendEmptySample()
+                    try await parsingData.getSampleFromDataSet(sampleIndex: sampleIndex, dataSet : dataSet)
                 }
                 else {
-                    parsingData.currentSample = length
+                    try await parsingData.getSampleFromDataSet(sampleIndex: length, dataSet: dataSet)
                 }
             }
             else {
                 let dimension = format.rawValue - DataFormatType.rDimension0.rawValue
                 if (tensorAffect == .input || tensorAffect == .both) {
-                    if (dimension < parsingData.currentInputLocation.count) {
-                        if (length < 0) {
-                            parsingData.currentInputLocation[dimension] += 1
-                        }
-                        else {
-                            parsingData.currentInputLocation[dimension] = length
-                        }
-                    }
+                    await parsingData.setOrIncrementInputDimension(dimension: dimension, toValue: length)
                 }
                 if (tensorAffect == .output || tensorAffect == .both) {
-                    if (dimension < parsingData.currentOutputLocation.count) {
-                        if (length < 0) {
-                            parsingData.currentOutputLocation[dimension] += 1
-                        }
-                        else {
-                            parsingData.currentOutputLocation[dimension] = length
-                        }
-                    }
+                    await parsingData.setOrIncrementOutputDimension(dimension: dimension, toValue: length)
                 }
             }
         }
     }
 
-    func readBinaryData(inputFile : InputStream, dataSet : DataSet) -> [Double]?
+    func readBinaryData(inputFile : InputStream, dataSet : DataSet) async -> [Double]?
     {
         //  Read the data bytes
-        let dataByteLength = format.byteLength
-        let byteLength = dataByteLength * length
+        let formatByteLength = format.byteLength
+        let dataByteLength: Int
+        let byteLength: Int
+        if let formatByteLength = formatByteLength {
+            dataByteLength = formatByteLength
+            byteLength = dataByteLength * length
+        }
+        else {
+            dataByteLength = 1
+            byteLength = 1
+        }
         var bytes = [UInt8](repeating: 0, count: byteLength)
         let numRead = inputFile.read(&bytes, maxLength: byteLength)
         if (numRead < byteLength) {
@@ -551,7 +580,7 @@ public class DataChunk {
         case .fTextString:
             if let string = String(bytes: bytes, encoding: .utf8) {
                 //  Convert the string to an index based on the known labels
-                let labelIndex = dataSet.getLabelIndex(label: string)
+                let labelIndex = await dataSet.getLabelIndex(label: string)
                 if (labelIndex >= 0) {
                     return [Double(labelIndex)]
                 }
@@ -596,12 +625,12 @@ public class DataChunk {
         }
     }
 
-    func parseBinaryChunk(intoDataSet: DataSet, data: Data, offset : inout Int, parsingData: ParsingData) throws
+    func parseBinaryChunk(intoDataSet: DataSet, data: Data, offset : inout Int, parsingData: ParsingData) async throws
     {
         //  Get the data for the types that can use it
         var dataValues : [Double]?
         if (type != .OutputLabel && type != .Repeat && type != .SetDimension) {
-            dataValues = extractBinaryData(data : data, offset: &offset, dataSet: intoDataSet)
+            dataValues = await extractBinaryData(data : data, offset: &offset, dataSet: intoDataSet)
             if (dataValues == nil) {
                 throw DataParsingErrors.ErrorReadingBinaryData
             }
@@ -614,51 +643,52 @@ public class DataChunk {
             return
         case .Label, .LabelIndex:
             //  Store the label for this data set
-            try intoDataSet.appendOutputClass(Int(dataValues![0]), parsingData: parsingData)
+            try await parsingData.appendOutputClass(Int(dataValues![0]))
         case .Feature:
             //  Store the feature values for the current input location
-            try intoDataSet.appendInputData(dataValues!, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendInputData(dataValues!, normalizationIndex: normalizationIndex)
         case .RedValue:
             //  Store the red values for the current input location
-            try intoDataSet.appendColorData(dataValues!, channel: .red, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendColorData(dataValues!, channel: .red, normalizationIndex: normalizationIndex)
         case .GreenValue:
             //  Store the green values for the current input location
-            try intoDataSet.appendColorData(dataValues!, channel: .green, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendColorData(dataValues!, channel: .green, normalizationIndex: normalizationIndex)
         case .BlueValue:
             //  Store the blue values for the current input location
-            try intoDataSet.appendColorData(dataValues!, channel: .blue, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendColorData(dataValues!, channel: .blue, normalizationIndex: normalizationIndex)
         case .OutputValues:
             //  Store the output values for the current output location
-            try intoDataSet.appendOutputData(dataValues!, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendOutputData(dataValues!, normalizationIndex: normalizationIndex)
         case .OutputLabel:
             if let string = extractBinaryString(data : data, offset: &offset, dataSet: intoDataSet) {
-                try intoDataSet.appendOutputLabel(string, normalizationIndex: normalizationIndex, parsingData: parsingData)
+                let labelIndex = await intoDataSet.getLabelIndex(label: string)
+                try await parsingData.appendOutputLabel(labelIndex, normalizationIndex: normalizationIndex)
             }
             else {
                 throw DataParsingErrors.ErrorReadingBinaryData
             }
         case .Repeat:
-            //  Set the stage for reading this dimension
+            //  Set the stage for repeating this dimension
             let dimension = format.rawValue - DataFormatType.rDimension0.rawValue
             //  Iterate
             for _ in 0..<length {
                 //  If a sample iterator, increment up front so new sample can be created when needed
                 if (format == .rSample) {
-                    intoDataSet.incrementSample(parsingData: parsingData)
+                    let sampleIndex = try await intoDataSet.incrementIndexAppendEmptySample(oldIndex: parsingData.currentSampleIndex)
+                    try await parsingData.getSampleFromDataSet(sampleIndex: sampleIndex, dataSet : intoDataSet)
                 }
                 //  Process each chunk
                 for chunk in repeatChunks! {
                     do {
-                        try chunk.parseBinaryChunk(intoDataSet: intoDataSet, data : data, offset: &offset, parsingData: parsingData)
+                        try await chunk.parseBinaryChunk(intoDataSet: intoDataSet, data : data, offset: &offset, parsingData: parsingData)
                     }
                     catch DataParsingErrors.ErrorReadingBinaryData {
-                        //  If a sample repeat, and and the current location is 0, delete last (empty) sample and return true - we are done
+                        //  If a sample repeat, and the current location is 0, delete last (empty) sample and return true - we are done
                         if (format == .rSample) {
-                            let inputSum = parsingData.currentInputLocation.reduce(0, +)
-                            let outputSum = parsingData.currentOutputLocation.reduce(0, +)
-                            if (inputSum == 0 && outputSum == 0) {
-                                intoDataSet.samples.removeLast()
-                                parsingData.currentSample -= 1
+                            let haveAddedData = await parsingData.haveAddedData()
+                            if (!haveAddedData) {
+                                try await intoDataSet.removeFinalSample()
+                                await parsingData.dropCurrentSample()
                             }
                             return
                        }
@@ -672,49 +702,139 @@ public class DataChunk {
                 //  Increment the dimension
                 if (format != .rSample) {
                     if (tensorAffect == .input || tensorAffect == .both) {
-                        if (dimension < parsingData.currentInputLocation.count) { parsingData.currentInputLocation[dimension] += 1 }
+                        await parsingData.incrementInputDimension(dimension: dimension)
                     }
                     if (tensorAffect == .output || tensorAffect == .both) {
-                        if (dimension < parsingData.currentOutputLocation.count) { parsingData.currentOutputLocation[dimension] += 1 }
+                        await parsingData.incrementOutputDimension(dimension: dimension)
                     }
+                }
+                else {
+                    //  Sample repeat - put the sample back
+                    try await parsingData.putSampleBackIntoDataSet(dataSet: intoDataSet)
                 }
            }
         case .SetDimension:
             if (format == .rSample) {
+                try await parsingData.putSampleBackIntoDataSet(dataSet: intoDataSet)
                 if (length < 0) {
-                    intoDataSet.incrementSample(parsingData: parsingData)
+                    let sampleIndex = try await intoDataSet.appendEmptySample()
+                    try await parsingData.getSampleFromDataSet(sampleIndex: sampleIndex, dataSet : intoDataSet)
                 }
                 else {
-                    parsingData.currentSample = length
+                    try await parsingData.getSampleFromDataSet(sampleIndex: length, dataSet: intoDataSet)
                 }
             }
             else {
                 let dimension = format.rawValue - DataFormatType.rDimension0.rawValue
                 if (tensorAffect == .input || tensorAffect == .both) {
-                    if (dimension < parsingData.currentInputLocation.count) {
-                        if (length < 0) {
-                            parsingData.currentInputLocation[dimension] += 1
-                        }
-                        else {
-                            parsingData.currentInputLocation[dimension] = length
-                        }
-                    }
+                    await parsingData.setOrIncrementInputDimension(dimension: dimension, toValue: length)
                 }
                 if (tensorAffect == .output || tensorAffect == .both) {
-                    if (dimension < parsingData.currentOutputLocation.count) {
-                        if (length < 0) {
-                            parsingData.currentOutputLocation[dimension] += 1
-                        }
-                        else {
-                            parsingData.currentOutputLocation[dimension] = length
-                        }
-                    }
+                    await parsingData.setOrIncrementOutputDimension(dimension: dimension, toValue: length)
                 }
             }
         }
     }
     
-    func extractBinaryData(data : Data, offset: inout Int, dataSet: DataSet) -> [Double]? {
+    func repeatBinarySample(ofLength: Int, intoDataSet: DataSet, inputFile : InputStream, parsingData: ParsingData, maxConcurrent: Int) async throws
+    {
+        var numSubmitted = 0
+        var bytes: [UInt8] = [UInt8](repeating: 0, count: ofLength)
+        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
+            //  Iterate
+            while true {
+                //  Get the data for this sample
+                let numRead = inputFile.read(&bytes, maxLength: ofLength)
+                if (numRead < ofLength) {
+                    return
+                }
+                
+                //  Increment up front so new sample can be created when needed
+                let sampleIndex = try await intoDataSet.incrementIndexAppendEmptySample(oldIndex: parsingData.currentSampleIndex)
+                try await parsingData.getSampleFromDataSet(sampleIndex: sampleIndex, dataSet : intoDataSet)
+                
+                //  Make a copy of the parsingData
+                let parsingDataCopy = await ParsingData(copyFrom: parsingData)
+                
+                //  If less than max concurrency submitted, add it immediately.  Otherwise wait for one to finish
+                if (numSubmitted >= maxConcurrent) {
+                    try await taskGroup.next()
+                }
+                
+                //  Create the data object
+                let sampleData = Data(bytes)
+
+                let added = taskGroup.addTaskUnlessCancelled {
+                    //  Process each chunk
+                    var sampleOffset = 0
+                    for chunk in self.repeatChunks! {
+                        do {
+                            try await chunk.parseBinaryChunk(intoDataSet: intoDataSet, data : sampleData, offset: &sampleOffset, parsingData: parsingDataCopy)
+                        }
+                        catch DataParsingErrors.ErrorReadingBinaryData {
+                            //  Rethrow the error
+                            throw DataParsingErrors.ErrorReadingBinaryData
+                        }
+                    }
+                    
+                    //  Put back the  data
+                    try await parsingDataCopy.putSampleBackIntoDataSet(dataSet: intoDataSet)
+                }
+                if (added) { numSubmitted += 1 }
+            }
+        }
+
+    }
+
+    func repeatBinarySample(ofLength: Int, intoDataSet: DataSet, data: Data, offset : inout Int, parsingData: ParsingData, maxConcurrent: Int) async throws
+    {
+        var localOffset = offset
+        var numSubmitted = 0
+        try await withThrowingTaskGroup(of: Void.self) { taskGroup in
+            //  Iterate
+            while true {
+                //  Get the data for this sample
+                let sampleEnd = localOffset+ofLength
+                if (data.count < sampleEnd) { break }   //  Not enough data for another one
+                let range = localOffset..<(sampleEnd)
+                let sampleData = data[range]
+                localOffset += ofLength
+                
+                //  Increment up front so new sample can be created when needed
+                let sampleIndex = try await intoDataSet.incrementIndexAppendEmptySample(oldIndex: parsingData.currentSampleIndex)
+                try await parsingData.getSampleFromDataSet(sampleIndex: sampleIndex, dataSet : intoDataSet)
+                
+                //  Make a copy of the parsingData
+                let parsingDataCopy = await ParsingData(copyFrom: parsingData)
+                
+                //  If less than max concurrency submitted, add it immediately.  Otherwise wait for one to finish
+                if (numSubmitted >= maxConcurrent) {
+                    try await taskGroup.next()
+                }
+                
+                let added = taskGroup.addTaskUnlessCancelled {
+                    //  Process each chunk
+                    var sampleOffset = 0
+                    for chunk in self.repeatChunks! {
+                        do {
+                            try await chunk.parseBinaryChunk(intoDataSet: intoDataSet, data : sampleData, offset: &sampleOffset, parsingData: parsingDataCopy)
+                        }
+                        catch DataParsingErrors.ErrorReadingBinaryData {
+                            //  Rethrow the error
+                            throw DataParsingErrors.ErrorReadingBinaryData
+                        }
+                    }
+                    
+                    //  Put back the  data
+                    try await parsingDataCopy.putSampleBackIntoDataSet(dataSet: intoDataSet)
+                }
+                if (added) { numSubmitted += 1 }
+             }
+        }
+        offset = localOffset
+    }
+    
+    func extractBinaryData(data : Data, offset: inout Int, dataSet: DataSet) async -> [Double]? {
         //  Create the double array
         var floats = [Double](repeating: 0, count: length)
 
@@ -722,65 +842,115 @@ public class DataChunk {
         switch (format) {
         case .fInt8:
             let scaleFactor = 1.0 / Double(Int8.max)
-            for index in 0..<length {
-                guard let x : Int8 = data.extractValue(offset: &offset) else { return nil }
-                if (postProcessing == .Scale_0_1) {
-                    floats[index] = Double(x) * scaleFactor
-                }
-                else {
-                    floats[index] = Double(x)
+            let itemSize = MemoryLayout<Int8>.size
+            let totalLength = itemSize * length
+            let endIndex = offset + totalLength
+            if (endIndex > data.count) { return nil }
+            let span: Span<UInt8> = data.span.extracting(offset..<endIndex)
+            span.withUnsafeBytes { ptr in
+                let bufferPointer: UnsafeBufferPointer<Int8> = ptr.bindMemory(to: Int8.self)
+                for index in 0..<length {
+                    floats[index] = Double(bufferPointer[index])
+                    if (postProcessing == .Scale_0_1) {
+                        floats[index] *= scaleFactor
+                    }
                 }
             }
+            offset += totalLength
         case .fUInt8:
             let scaleFactor = 1.0 / Double(UInt8.max)
+            let itemSize = MemoryLayout<UInt8>.size
+            let totalLength = itemSize * length
+            let endIndex = offset + totalLength
+            if (endIndex > data.count) { return nil }
+            let span: Span<UInt8> = data.span.extracting(offset..<endIndex)
             for index in 0..<length {
-                guard let x : UInt8 = data.extractValue(offset: &offset) else { return nil }
+                floats[index] = Double(span[index])
                 if (postProcessing == .Scale_0_1) {
-                    floats[index] = Double(x) * scaleFactor
+                    floats[index] *= scaleFactor
                 }
-                else {
-                    floats[index] = Double(x)
-                }
-           }
+            }
+            offset += totalLength
+
         case .fInt16:
             let scaleFactor = 1.0 / Double(Int16.max)
-            for index in 0..<length {
-                guard let x : Int16 = data.extractValue(offset: &offset) else { return nil }
-                if (postProcessing == .Scale_0_1) {
-                    floats[index] = Double(x) * scaleFactor
+            let itemSize = MemoryLayout<Int16>.size
+            let totalLength = itemSize * length
+            let endIndex = offset + totalLength
+            if (endIndex > data.count) { return nil }
+            let span: Span<UInt8> = data.span.extracting(offset..<endIndex)
+            span.withUnsafeBytes { ptr in
+                let bufferPointer: UnsafeBufferPointer<Int16> = ptr.bindMemory(to: Int16.self)
+                for index in 0..<length {
+                    floats[index] = Double(bufferPointer[index])
+                    if (postProcessing == .Scale_0_1) {
+                        floats[index] *= scaleFactor
+                    }
                 }
-                else {
-                    floats[index] = Double(x)
-                }
-           }
+            }
+            offset += totalLength
         case .fUInt16:
             let scaleFactor = 1.0 / Double(UInt16.max)
-            for index in 0..<length {
-                guard let x : UInt16 = data.extractValue(offset: &offset) else { return nil }
-                if (postProcessing == .Scale_0_1) {
-                    floats[index] = Double(x) * scaleFactor
-                }
-                else {
-                    floats[index] = Double(x)
+            let itemSize = MemoryLayout<UInt16>.size
+            let totalLength = itemSize * length
+            let endIndex = offset + totalLength
+            if (endIndex > data.count) { return nil }
+            let span: Span<UInt8> = data.span.extracting(offset..<endIndex)
+            span.withUnsafeBytes { ptr in
+                let bufferPointer: UnsafeBufferPointer<UInt16> = ptr.bindMemory(to: UInt16.self)
+                for index in 0..<length {
+                    floats[index] = Double(bufferPointer[index])
+                    if (postProcessing == .Scale_0_1) {
+                        floats[index] *= scaleFactor
+                    }
                 }
             }
+            offset += totalLength
         case .fInt32:
-            for index in 0..<length {
-                guard let x : Int32 = data.extractValue(offset: &offset) else { return nil }
-                floats[index] = Double(x)
-                if (postProcessing == .Scale_0_1) { floats[index] /= Double(Int32.max) }
+            let itemSize = MemoryLayout<Int32>.size
+            let totalLength = itemSize * length
+            let endIndex = offset + totalLength
+            if (endIndex > data.count) { return nil }
+            let span: Span<UInt8> = data.span.extracting(offset..<endIndex)
+            span.withUnsafeBytes { ptr in
+                let bufferPointer: UnsafeBufferPointer<Int32> = ptr.bindMemory(to: Int32.self)
+                for index in 0..<length {
+                    floats[index] = Double(bufferPointer[index])
+                    if (postProcessing == .Scale_0_1) {
+                        floats[index] /= Double(Int32.max)
+                    }
+                }
             }
+            offset += totalLength
         case .fUInt32:
-            for index in 0..<length {
-                guard let x : UInt32 = data.extractValue(offset: &offset) else { return nil }
-                floats[index] = Double(x)
-                if (postProcessing == .Scale_0_1) { floats[index] /= Double(UInt32.max) }
+            let itemSize = MemoryLayout<UInt32>.size
+            let totalLength = itemSize * length
+            let endIndex = offset + totalLength
+            if (endIndex > data.count) { return nil }
+            let span: Span<UInt8> = data.span.extracting(offset..<endIndex)
+            span.withUnsafeBytes { ptr in
+                let bufferPointer: UnsafeBufferPointer<UInt32> = ptr.bindMemory(to: UInt32.self)
+                for index in 0..<length {
+                    floats[index] = Double(bufferPointer[index])
+                    if (postProcessing == .Scale_0_1) {
+                        floats[index] /= Double(UInt32.max)
+                    }
+                }
             }
+            offset += totalLength
         case .fFloat32:
-            for index in 0..<length {
-                guard let x : Float = data.extractValue(offset: &offset) else { return nil }
-                floats[index] = Double(x)
+            let itemSize = MemoryLayout<Float32>.size
+            let totalLength = itemSize * length
+            let endIndex = offset + totalLength
+            if (endIndex > data.count) { return nil }
+            let span: Span<UInt8> = data.span.extracting(offset..<endIndex)
+            span.withUnsafeBytes { ptr in
+                let bufferPointer: UnsafeBufferPointer<Float32> = ptr.bindMemory(to: Float32.self)
+                for index in 0..<length {
+                    floats[index] = Double(bufferPointer[index])
+                }
             }
+            offset += totalLength
         case .fDouble:
             for index in 0..<length {
                 guard let x : Double = data.extractValue(offset: &offset) else { return nil }
@@ -789,7 +959,7 @@ public class DataChunk {
         case .fTextString:
             guard let string = data.extractUnsizedString(length: length, offset: &offset) else { return nil }
             //  Convert the string to an index based on the known labels
-            let labelIndex = dataSet.getLabelIndex(label: string)
+            let labelIndex = await dataSet.getLabelIndex(label: string)
             if (labelIndex >= 0) {
                 return [Double(labelIndex)]
             }
@@ -820,7 +990,7 @@ public class DataChunk {
     }
     
 
-    func parseTextChunk(dataSet: DataSet, components: [String], offset : Int, parsingData: ParsingData) throws -> Int
+    func parseTextChunk(dataSet: DataSet, components: [String], offset : Int, parsingData: ParsingData) async throws -> Int
     {
         //  Get the data for types that can use it
         var numUsed = 0
@@ -836,7 +1006,7 @@ public class DataChunk {
                     numUsed += 1
                 }
                 else {
-                    if let value = getFloatData(component: components[index], dataSet: dataSet) {
+                    if let value = await getFloatData(component: components[index], dataSet: dataSet) {
                         data[i] = value
                         numUsed += 1
                     }
@@ -854,24 +1024,25 @@ public class DataChunk {
             return numUsed
         case .Label, .LabelIndex:
             //  Store the label for this data set
-            try dataSet.appendOutputClass(Int(data[0]), parsingData: parsingData)
+            try await parsingData.appendOutputClass(Int(data[0]))
         case .Feature:
             //  Store the feature values for the current input location
-            try dataSet.appendInputData(data, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendInputData(data, normalizationIndex: normalizationIndex)
         case .RedValue:
             //  Store the red values for the current input location
-            try dataSet.appendColorData(data, channel: .red, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendColorData(data, channel: .red, normalizationIndex: normalizationIndex)
         case .GreenValue:
             //  Store the green values for the current input location
-            try dataSet.appendColorData(data, channel: .green, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendColorData(data, channel: .green, normalizationIndex: normalizationIndex)
         case .BlueValue:
             //  Store the blue values for the current input location
-            try dataSet.appendColorData(data, channel: .blue, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendColorData(data, channel: .blue, normalizationIndex: normalizationIndex)
         case .OutputValues:
             //  Store the output values for the current output location
-            try dataSet.appendOutputData(data, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            try await parsingData.appendOutputData(data, normalizationIndex: normalizationIndex)
         case .OutputLabel:
-            try dataSet.appendOutputLabel(components[offset], normalizationIndex: normalizationIndex, parsingData: parsingData)
+            let labelIndex = await dataSet.getLabelIndex(label: components[offset])
+            try await parsingData.appendOutputLabel(labelIndex, normalizationIndex: normalizationIndex)
             return 1
         case .Repeat:
             //  Set the stage for reading this dimension
@@ -881,50 +1052,38 @@ public class DataChunk {
             for _ in 0..<length {
                 //  Process each chunk
                 for chunk in repeatChunks! {
-                    let usedComponents = try chunk.parseTextChunk(dataSet: dataSet, components: components, offset : offset + numUsed, parsingData: parsingData)
+                    let usedComponents = try await chunk.parseTextChunk(dataSet: dataSet, components: components, offset : offset + numUsed, parsingData: parsingData)
                     numUsed += usedComponents
                 }
 
                 //  Increment the dimension
                 if (format != .rSample) {
                     if (tensorAffect == .input || tensorAffect == .both) {
-                        if (dimension < parsingData.currentInputLocation.count) { parsingData.currentInputLocation[dimension] += 1 }
+                        await parsingData.incrementInputDimension(dimension: dimension)
                     }
                     if (tensorAffect == .output || tensorAffect == .both) {
-                        if (dimension < parsingData.currentOutputLocation.count) { parsingData.currentOutputLocation[dimension] += 1 }
+                        await parsingData.incrementOutputDimension(dimension: dimension)
                     }
                 }
             }
         case .SetDimension:
             if (format == .rSample) {
+                try await parsingData.putSampleBackIntoDataSet(dataSet: dataSet)
                 if (length < 0) {
-                    dataSet.incrementSample(parsingData : parsingData)
+                    let sampleIndex = try await dataSet.appendEmptySample()
+                    try await parsingData.getSampleFromDataSet(sampleIndex: sampleIndex, dataSet : dataSet)
                 }
                 else {
-                    parsingData.currentSample = length
+                    try await parsingData.getSampleFromDataSet(sampleIndex: length, dataSet: dataSet)
                 }
             }
             else {
                 let dimension = format.rawValue - DataFormatType.rDimension0.rawValue
                 if (tensorAffect == .input || tensorAffect == .both) {
-                    if (dimension < parsingData.currentInputLocation.count) {
-                        if (length < 0) {
-                            parsingData.currentInputLocation[dimension] += 1
-                        }
-                        else {
-                            parsingData.currentInputLocation[dimension] = length
-                        }
-                    }
+                    await parsingData.setOrIncrementInputDimension(dimension: dimension, toValue: length)
                 }
                 if (tensorAffect == .output || tensorAffect == .both) {
-                    if (dimension < parsingData.currentOutputLocation.count) {
-                        if (length < 0) {
-                            parsingData.currentOutputLocation[dimension] += 1
-                        }
-                        else {
-                            parsingData.currentOutputLocation[dimension] = length
-                        }
-                    }
+                    await parsingData.setOrIncrementOutputDimension(dimension: dimension, toValue: length)
                 }
             }
         }
@@ -932,12 +1091,12 @@ public class DataChunk {
         return numUsed
     }
 
-    func getFloatData(component: String, dataSet: DataSet) -> Double?
+    func getFloatData(component: String, dataSet: DataSet) async -> Double?
     {
         switch (format) {
         case .fTextString:
             //  Convert the string to an index based on the known labels
-            let labelIndex = dataSet.getLabelIndex(label: component)
+            let labelIndex = await dataSet.getLabelIndex(label: component)
             if (labelIndex >= 0) {
                 return Double(labelIndex)
             }
@@ -950,7 +1109,7 @@ public class DataChunk {
         return nil
     }
 
-    func parseFixedWidthTextChunk(dataSet: DataSet, string: String, index : String.Index, parsingData : ParsingData) throws -> String.Index?
+    func parseFixedWidthTextChunk(dataSet: DataSet, string: String, index : String.Index, parsingData : ParsingData) async throws -> String.Index?
     {
         //  Get the data for types that can use it
         var data : Double = 0.0
@@ -976,24 +1135,25 @@ public class DataChunk {
             return endIndex
         case .Label, .LabelIndex:
             //  Store the label for this data set
-            try dataSet.appendOutputClass(Int(data), parsingData : parsingData)
+            try await parsingData.appendOutputClass(Int(data))
         case .Feature:
             //  Store the feature values for the current input location
-            try dataSet.appendInputData([data], normalizationIndex: normalizationIndex, parsingData : parsingData)
+            try await parsingData.appendInputData([data], normalizationIndex: normalizationIndex)
         case .RedValue:
             //  Store the red values for the current input location
-            try dataSet.appendColorData([data], channel: .red, normalizationIndex: normalizationIndex, parsingData : parsingData)
+            try await parsingData.appendColorData([data], channel: .red, normalizationIndex: normalizationIndex)
         case .GreenValue:
             //  Store the green values for the current input location
-            try dataSet.appendColorData([data], channel: .green, normalizationIndex: normalizationIndex, parsingData : parsingData)
+            try await parsingData.appendColorData([data], channel: .green, normalizationIndex: normalizationIndex)
         case .BlueValue:
             //  Store the blue values for the current input location
-            try dataSet.appendColorData([data], channel: .blue, normalizationIndex: normalizationIndex, parsingData : parsingData)
+            try await parsingData.appendColorData([data], channel: .blue, normalizationIndex: normalizationIndex)
         case .OutputValues:
             //  Store the output values for the current output location
-            try dataSet.appendOutputData([data], normalizationIndex: normalizationIndex, parsingData : parsingData)
+            try await parsingData.appendOutputData([data], normalizationIndex: normalizationIndex)
         case .OutputLabel:
-            try dataSet.appendOutputLabel(string, normalizationIndex: normalizationIndex, parsingData: parsingData)
+            let labelIndex = await dataSet.getLabelIndex(label: string)
+            try await parsingData.appendOutputLabel(labelIndex, normalizationIndex: normalizationIndex)
         case .Repeat:
             //  Set the stage for reading this dimension
             let dimension = format.rawValue - DataFormatType.rDimension0.rawValue
@@ -1002,7 +1162,7 @@ public class DataChunk {
             for _ in 0..<length {
                 //  Process each chunk
                 for chunk in repeatChunks! {
-                    let finalIndex = try chunk.parseFixedWidthTextChunk(dataSet: dataSet, string: string, index : startIndex, parsingData : parsingData)
+                    let finalIndex = try await chunk.parseFixedWidthTextChunk(dataSet: dataSet, string: string, index : startIndex, parsingData : parsingData)
                     if (finalIndex == nil) {
                         return nil
                     }
@@ -1012,35 +1172,31 @@ public class DataChunk {
 
             //  Increment the dimension
             if (format != .rSample) {
-                if (dimension < parsingData.currentInputLocation.count) { parsingData.currentInputLocation[dimension] += 1 }
-                if (dimension < parsingData.currentOutputLocation.count) { parsingData.currentOutputLocation[dimension] += 1 }
+                if (tensorAffect == .input || tensorAffect == .both) {
+                    await parsingData.incrementInputDimension(dimension: dimension)
+                }
+                if (tensorAffect == .output || tensorAffect == .both) {
+                    await parsingData.incrementOutputDimension(dimension: dimension)
+                 }
             }
         case .SetDimension:
             if (format == .rSample) {
+                try await parsingData.putSampleBackIntoDataSet(dataSet: dataSet)
                 if (length < 0) {
-                    dataSet.incrementSample(parsingData : parsingData)
+                    let sampleIndex = try await dataSet.appendEmptySample()
+                    try await parsingData.getSampleFromDataSet(sampleIndex: sampleIndex, dataSet : dataSet)
                 }
                 else {
-                    parsingData.currentSample = length
+                    try await parsingData.getSampleFromDataSet(sampleIndex: length, dataSet: dataSet)
                 }
             }
             else {
                 let dimension = format.rawValue - DataFormatType.rDimension0.rawValue
-                if (dimension < parsingData.currentInputLocation.count) {
-                    if (length < 0) {
-                        parsingData.currentInputLocation[dimension] += 1
-                    }
-                    else {
-                        parsingData.currentInputLocation[dimension] = length
-                    }
+                if (tensorAffect == .input || tensorAffect == .both) {
+                    await parsingData.setOrIncrementInputDimension(dimension: dimension, toValue: length)
                 }
-                if (dimension < parsingData.currentOutputLocation.count) {
-                    if (length < 0) {
-                        parsingData.currentOutputLocation[dimension] += 1
-                    }
-                    else {
-                        parsingData.currentOutputLocation[dimension] = length
-                    }
+                if (tensorAffect == .output || tensorAffect == .both) {
+                    await parsingData.setOrIncrementOutputDimension(dimension: dimension, toValue: length)
                 }
             }
         }

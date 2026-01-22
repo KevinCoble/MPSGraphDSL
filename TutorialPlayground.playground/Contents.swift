@@ -179,11 +179,12 @@ let parser = DelineatedTextParser(lineSeparator: .CommaSeparated) {
 }.withCommentIndicators(["s", "#", "//"])
 
 //:  Parse the data into the DataSet
-try parser.parseTextLines(dataSet: dataSet, text: textLines)
-print("Number of samples = \(dataSet.numSamples)")
+try await parser.parseTextLines(dataSet: dataSet, text: textLines)
+let numSamples = await dataSet.numSamples
+print("Number of samples = \(numSamples)")
 
 //:  At this point, we now have 150 samples in a single DataSet.  We need to split this into two sets, a training set and a testing set.  We will do this randomly, with 30 random samples going into the testing set.  This function also has the effect of shuffling the samples, so all the samples of each Ibis type is not contiguous anymore
-let splitSets = try dataSet.splitSetRandomly(secondSetCount: 30)
+let splitSets = try await dataSet.splitSetRandomly(secondSetCount: 30)
 let trainingDataSet = splitSets.set1
 let testDataSet = splitSets.set2
 
@@ -205,16 +206,16 @@ let graph = Graph(buildOptions: [.addLoadAssigns, .addResetAssigns]) {
 
 
 //:  Get the initial accuracy by running the test data set through the graph.  Note the mode is 'infer', so the loss function is not calculated and learning is not performed
-let result = try graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
+let result = try await graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
 print("Initial test percentage: \(result.fractionCorrect*100.0)")
 
 //:  Train the network by running through all the training data 500 times.  Note that the mode is 'learn', so the loss function is calculated and weights and biases updated
 for _ in 0..<500 {
-    try graph.runTraining(mode: "learn", trainingDataSet: trainingDataSet, inputTensorName: "inputs", expectedValueTensorName: "expectedValue")
+    try await graph.runTraining(mode: "learn", trainingDataSet: trainingDataSet, inputTensorName: "inputs", expectedValueTensorName: "expectedValue")
 }
 
 //:  Get the final accuracy by running the test data set through again
-let result2 = try graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
+let result2 = try await graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
 print("final test percentage: \(result2.fractionCorrect*100.0)")
 
 
@@ -233,7 +234,7 @@ let resultTensor = results["inferenceResult"]!
 //  Get the classification, and the string label for the result
 let resultClass = resultTensor.getClassification()
 var classString = "Unknown"
-if let string = trainingDataSet.getLabel(labelIndex: resultClass) {
+if let string = await trainingDataSet.getLabel(labelIndex: resultClass) {
     classString = string
 }
 print("Resulting Iris class is \(resultClass) - \(classString)")
@@ -247,12 +248,12 @@ print("byte count = \(data.count)")
 try graph.resetVariables()
 
 //:  Get the post-reset accuracy by running the test data set through again
-let result3 = try graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
+let result3 = try await graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
 print("After reset percentage: \(result3.fractionCorrect*100.0)")
 
 //:  Load the variables back to the post-learn state.  The data could have been saved to a file on a previous learning session, and read back to load the graph back to that state
 try graph.loadVariables(fromData: data)
 
 //:  Get the post-reset accuracy by running the test data set through again
-let result4 = try graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
+let result4 = try await graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
 print("After load percentage: \(result4.fractionCorrect*100.0)")

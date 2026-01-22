@@ -246,9 +246,9 @@ For our example, let's work with the MNIST data set.  It is a well-known data se
 let MNISTInputParser = DataParser {
     UnusedData(length: 16, format: .fUInt8)
     RepeatSampleTillDone {
-        RepeatDimension(count: 28, dimension: .Dimension0) {
+        RepeatDimension(count: 28, dimension: .Dimension0, affects: .input) {
             InputData(length: 28, format : .fUInt8, postProcessing : .None)
-            SetDimension(dimension: .Dimension1, toValue: 0)
+            SetDimension(dimension: .Dimension1, toValue: 0, affects: .input)
         }
     }
 }

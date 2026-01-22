@@ -2097,3 +2097,27 @@ public class Quantize : UnaryNode {
         return [result]
     }
 }
+
+///   Node to return the shape of a tensor as an Integer32 tensor
+public class ShapeOfTensor : UnaryNode {
+
+    ///  Constructor for a shape-of operation
+    ///
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, name: String? = nil) {
+        super.init(input: input, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+
+        //  Add to the graph itself
+        let result = graph.mpsgraph.shapeOf(inputTensor, name: graph.getFullName(name))
+        
+        //  Remember the output tensor and shape for later
+        return [result]
+    }
+}

@@ -35,6 +35,7 @@ let onehot = false
 let dropout = false
 let quantize = false
 let pool = false
+let shapeOf = false
 
 if matrixMultiplication {
     let MMvectorTensor = try TensorFloat32(shape: TensorShape([2]), initialValues: [7.0, 8.0])
@@ -761,3 +762,55 @@ if (pool) {
     result = results["result"]!
     try result.print2D(elementWidth: 6, precision: 1)
 }
+
+if (shapeOf) {
+    let initialTensor = try TensorFloat32(shape: TensorShape([2, 1, 3, 4]), initialValues: [7.0, 2.0, 1.0, 9.0, 5.0, 6.0, 3.0, 8.0, 1.2, -2.0, 9.0, 17.0, 6.3, 5.8, 14.0, 2.3, 16.0,  7.2,  10.3, 6.7, 1.0, 2.0, 3.0, 4.0])
+    print("Initial Tensor shape : [2, 1, 3, 4]")
+    
+    let shapeOfGraph = Graph {
+        Constant(values: initialTensor, name: "startTensor")
+        ShapeOfTensor()
+        Cast(newType: .float32, name: "result")
+            .targetForModes(["shapeOfTest"])
+    }
+
+    print("Shape of operation")
+    let results = try shapeOfGraph.runOne(mode: "shapeOfTest", inputTensors: [:])
+    let result = results["result"]!
+    try result.print1D(elementWidth: 3, precision: 0)
+}
+
+//  Set URLs as needed
+let fileManager = FileManager.default
+let docsDirURL = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+let MNISTTrainInputURL = docsDirURL.appendingPathComponent("MNIST/train-images.idx3-ubyte")
+let MNISTTrainOutputURL = docsDirURL.appendingPathComponent("MNIST/train-labels.idx1-ubyte")
+
+//  Load the data into memory
+let trainingInputData = try Data(contentsOf: MNISTTrainInputURL)
+let trainingOutputData = try Data(contentsOf: MNISTTrainOutputURL)
+
+//  Create the parsers
+let MNISTInputParser = DataParser {
+    UnusedData(length: 16, format: .fUInt8)
+    RepeatSampleTillDone {
+        RepeatDimension(count: 28, dimension: .Dimension0, affects: .input) {
+            InputData(length: 28, format : .fUInt8, postProcessing : .None)
+            SetDimension(dimension: .Dimension1, toValue: 0, affects: .input)
+        }
+    }
+}
+let MNISTOutputParser = DataParser {
+    UnusedData(length: 8, format: .fUInt8)
+    RepeatSampleTillDone {
+        LabelIndex(count: 1, format: .fUInt8)
+    }
+}
+
+//  Create the dataset
+let trainingDataSet = DataSet(inputShape: TensorShape([28, 28]), inputType: .float32, outputShape: TensorShape([10]), outputType: .float32)
+
+//  Parse the data
+try await MNISTInputParser.parseBinaryData(trainingInputData, intoDataSet: trainingDataSet)
+try await MNISTOutputParser.parseBinaryData(trainingOutputData, intoDataSet: trainingDataSet)
+let x = 3

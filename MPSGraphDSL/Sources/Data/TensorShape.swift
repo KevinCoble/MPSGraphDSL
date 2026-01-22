@@ -8,7 +8,7 @@
 import Foundation
 
 ///  Struct to define the shape of a Tensor, including number of dimensions and size of a Tensor in each of those dimensions
-public struct TensorShape : Equatable
+public struct TensorShape : Equatable, Sendable
 {
     ///  The array of dimensions sizes for the shape of the Tensor
     public var dimensions : [Int]

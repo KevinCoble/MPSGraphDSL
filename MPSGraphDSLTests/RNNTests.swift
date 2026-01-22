@@ -25,7 +25,7 @@ struct RNNTests {
                     let inputTensor = try TensorFloat32(shape: inputShape, initialValues: sequence)
                     let outputTensor = TensorFloat32(shape: outputShape, initialValue: output)
                     let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                    try dataSet.appendSample(sample)
+                    try await dataSet.appendSample(sample)
                 }
             }
             
@@ -43,8 +43,9 @@ struct RNNTests {
             
             //  See how many have the correct sign
             var numInitialCorrect: Int = 0
-            for i in 0..<dataSet.numSamples {
-                let sample = dataSet.samples[i]
+            let numSamples = await dataSet.numSamples
+            for i in 0..<numSamples {
+                let sample = try await dataSet.getSample(sampleIndex: i)
                 let results = try graph.runOne(mode: "infer", inputTensors: ["input": sample.inputs])
                 let result = results["RNN_lastState"]!
                 let predictedValue = try result.getElement(index: 0)
@@ -56,13 +57,13 @@ struct RNNTests {
             
             //  Train
             for _ in 0..<200 {
-                try graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
+                try await graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
             }
 
             //  Now see how many have the correct sign
             var numFinalCorrect: Int = 0
-            for i in 0..<dataSet.numSamples {
-                let sample = dataSet.samples[i]
+            for i in 0..<numSamples {
+                let sample = try await dataSet.getSample(sampleIndex: i)
                 let results = try graph.runOne(mode: "infer", inputTensors: ["input": sample.inputs])
                 let result = results["RNN_lastState"]!
                 let predictedValue = try result.getElement(index: 0)
@@ -91,7 +92,7 @@ struct RNNTests {
                 let inputTensor = try TensorFloat32(shape: inputShape, initialValues: sequence)
                 let outputTensor = TensorFloat32(shape: outputShape, initialValue: output)
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                try dataSet.appendSample(sample)
+                try await dataSet.appendSample(sample)
             }
             let testInput: [Float32] = [7.0, 8.0, 9.0]
             let testOutput: Float32 = 10.0
@@ -122,7 +123,7 @@ struct RNNTests {
             
             //  Train
             for _ in 0..<200 {
-                try graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
+                try await graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
             }
 
             //  Run an input in
@@ -163,7 +164,7 @@ struct RNNTests {
                         let inputTensor = try TensorFloat32(shape: inputShape, initialValues: sequence)
                         let outputTensor = TensorFloat32(shape: outputShape, initialValue: output)
                         let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
-                        try dataSet.appendSample(sample)
+                        try await dataSet.appendSample(sample)
                     }
                 }
             }
@@ -182,8 +183,9 @@ struct RNNTests {
             
             //  See how many have the correct sign
             var numInitialCorrect: Int = 0
-            for i in 0..<dataSet.numSamples {
-                let sample = dataSet.samples[i]
+            let numSamples = await dataSet.numSamples
+            for i in 0..<numSamples {
+                let sample = try await dataSet.getSample(sampleIndex: i)
                 let results = try graph.runOne(mode: "infer", inputTensors: ["input": sample.inputs])
                 let result = results["GRU_lastState"]!
                 let predictedValue = try result.getElement(index: 0)
@@ -195,13 +197,13 @@ struct RNNTests {
             
             //  Train
             for _ in 0..<20 {
-                try graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
+                try await graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
             }
 
             //  Now see how many have the correct sign
             var numFinalCorrect: Int = 0
-            for i in 0..<dataSet.numSamples {
-                let sample = dataSet.samples[i]
+            for i in 0..<numSamples {
+                let sample = try await dataSet.getSample(sampleIndex: i)
                 let results = try graph.runOne(mode: "infer", inputTensors: ["input": sample.inputs])
                 let result = results["GRU_lastState"]!
                 let predictedValue = try result.getElement(index: 0)

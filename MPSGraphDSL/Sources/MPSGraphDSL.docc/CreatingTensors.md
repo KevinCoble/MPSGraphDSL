@@ -11,6 +11,9 @@ There are two ways to create a ``Tensor`` - based on whether the data type (spec
 If at coding time you know what data type is needed, it is usually best to just create the Tensor using one of the classes that conform to the ``Tensor`` protocol that have fixed type.  These classes include:
 * ``TensorFloat32``
 * ``TensorUInt8``
+* ``TensorDouble``
+
+Note: Double tensors are not usable by the MPSGraph system, but the data parsers will create them if you want.
 
 The Tensor classes have some additional initializers, such as one that accepts an array of specific data type as initial values for the Tensor
 
