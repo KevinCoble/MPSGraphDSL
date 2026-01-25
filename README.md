@@ -32,5 +32,3 @@ One level down, into MPSGraphDSL, you can reference the swift package if that is
 ##  Use Notes
 ### Known Issues
 The GRU node cannot be trained (ran through back-propagation) at this time.  This is due to a reported error in the MPSGraph framework, and it is unknown if/when it will be fixed by Apple
-
-Attempts at concurrency on the Graph object are stalled due to the fact that none of MPSGraph or its' associated structures are Sendable, and previous methods (like those used in the source code for the Apple example 'TrainingANeuralNetworkUsingMPSGraph') are now invalid is Swift 6.

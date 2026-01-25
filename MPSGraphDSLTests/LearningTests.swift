@@ -590,7 +590,8 @@ struct LearningTests {
         
         //  Run the data through 1000 times
         for _ in 0..<1000 {
-            let _ = try await graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
+//            let _ = try await graph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
+            let _ = try await graph.runTraining(mode: "learn", trainingDataSet: testDataSet, inputTensorName: "inputs", expectedValueTensorName: "expectedValue")
         }
 
     }

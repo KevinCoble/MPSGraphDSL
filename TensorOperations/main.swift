@@ -36,6 +36,7 @@ let dropout = false
 let quantize = false
 let pool = false
 let shapeOf = false
+let depthToSpace = true
 
 if matrixMultiplication {
     let MMvectorTensor = try TensorFloat32(shape: TensorShape([2]), initialValues: [7.0, 8.0])
@@ -780,37 +781,31 @@ if (shapeOf) {
     try result.print1D(elementWidth: 3, precision: 0)
 }
 
-//  Set URLs as needed
-let fileManager = FileManager.default
-let docsDirURL = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
-let MNISTTrainInputURL = docsDirURL.appendingPathComponent("MNIST/train-images.idx3-ubyte")
-let MNISTTrainOutputURL = docsDirURL.appendingPathComponent("MNIST/train-labels.idx1-ubyte")
-
-//  Load the data into memory
-let trainingInputData = try Data(contentsOf: MNISTTrainInputURL)
-let trainingOutputData = try Data(contentsOf: MNISTTrainOutputURL)
-
-//  Create the parsers
-let MNISTInputParser = DataParser {
-    UnusedData(length: 16, format: .fUInt8)
-    RepeatSampleTillDone {
-        RepeatDimension(count: 28, dimension: .Dimension0, affects: .input) {
-            InputData(length: 28, format : .fUInt8, postProcessing : .None)
-            SetDimension(dimension: .Dimension1, toValue: 0, affects: .input)
-        }
+if (depthToSpace) {
+    var initValues = [Float32](repeating: 0.0, count: 64)
+    for i in 0..<64 { initValues[i] = Float32(i) }
+    let initialTensor = try TensorFloat32(shape: TensorShape([4, 4, 4]), initialValues: initValues)
+    try initialTensor.print3D(elementWidth: 6, precision: 1)
+    
+    let depthToSpaceGraph = Graph {
+        Constant(values: initialTensor, name: "startTensor")
+        DepthToSpace2D(widthAxis: 1, heightAxis: 0, depthAxis: 2, blockSize: 2, name: "result")
+            .targetForModes(["depthToSpaceTest"])
     }
-}
-let MNISTOutputParser = DataParser {
-    UnusedData(length: 8, format: .fUInt8)
-    RepeatSampleTillDone {
-        LabelIndex(count: 1, format: .fUInt8)
+    
+    print("DepthToSpace operation - width dimension 1, height dimension 0, depth dimension 2, block size 2")
+    var results = try depthToSpaceGraph.runOne(mode: "depthToSpaceTest", inputTensors: [:])
+    var result = results["result"]!
+    try result.print3D(elementWidth: 6, precision: 1)
+    
+    let spaceToDepthGraph = Graph {
+        Constant(values: result, name: "startTensor")
+        SpaceToDepth2D(widthAxis: 1, heightAxis: 0, depthAxis: 2, blockSize: 2, name: "result")
+            .targetForModes(["depthToSpaceTest"])
     }
+    
+    print("SpaceToDepth operation - width dimension 1, height dimension 0, depth dimension 2, block size 2")
+    results = try spaceToDepthGraph.runOne(mode: "depthToSpaceTest", inputTensors: [:])
+    result = results["result"]!
+    try result.print3D(elementWidth: 6, precision: 1)
 }
-
-//  Create the dataset
-let trainingDataSet = DataSet(inputShape: TensorShape([28, 28]), inputType: .float32, outputShape: TensorShape([10]), outputType: .float32)
-
-//  Parse the data
-try await MNISTInputParser.parseBinaryData(trainingInputData, intoDataSet: trainingDataSet)
-try await MNISTOutputParser.parseBinaryData(trainingOutputData, intoDataSet: trainingDataSet)
-let x = 3

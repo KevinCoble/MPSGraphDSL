@@ -565,13 +565,18 @@ public class Graph {
             throw MPSGraphRunErrors.PlaceHolderInputNotFound(resultTensorName)
         }
         
+        //  Get the double-buffer handler
+        let doubleBufferHandler = DoubleBufferActor()
+        
         //  Lock the dataset
         try await testDataSet.lockForMultiSampleUse()
         
-        var numCorrect: Int = 0
         let numSamples = await testDataSet.numSamples
         do {
             for sampleIndex in 0..<numSamples {
+                //  Wait for our turn
+                await doubleBufferHandler.getAllowance()
+
                 //  Get the command buffer
                 let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
                 
@@ -580,29 +585,29 @@ public class Graph {
                 
                 //  Convert the input tensor to MPS version and create the feed dictionary
                 let feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try sample.inputs.getMPSGraphTensorData(forGraph: self)]
-
-                //  Run the graph
-                let results = mpsgraph.encode(to: commandBuffer,
-                                              feeds: feedDict,
-                                              targetTensors: targets,
-                                              targetOperations: nil,
-                                              executionDescriptor: nil)
-
-                commandBuffer.commit()
-                let result = results[outputResultTensor]
                 
-                if let result = result {
+                //  Create the callback
+                let executionDesc = MPSGraphExecutionDescriptor()
+                executionDesc.completionHandler = { (resultsDictionary, nil) in
+                    let result: MPSGraphTensorData = resultsDictionary[outputResultTensor]!
                     let actual = sample.outputClass
                     let resultTensor = CreateTensor.fromMPSTensorData(result)
                     let predictedClass = resultTensor.getClassification()
+//                    if (sampleIndex < 100) { print("sample: \(sampleIndex), predicted: \(predictedClass), actual: \(actual)")}
                     
-                    if (predictedClass == actual) {
-                        numCorrect += 1
+                    Task {
+                        await doubleBufferHandler.operationComplete(correct: predictedClass == actual)
                     }
                 }
-                else {
-                    throw MPSGraphRunErrors.ResultTensorNotFound
-                }
+
+                //  Run the graph
+                let _ = mpsgraph.encode(to: commandBuffer,
+                                              feeds: feedDict,
+                                              targetTensors: targets,
+                                              targetOperations: nil,
+                                              executionDescriptor: executionDesc)
+
+                commandBuffer.commit()
             }
         }
         catch {
@@ -612,6 +617,8 @@ public class Graph {
         }
         try await testDataSet.releaseLock()
 
+        await doubleBufferHandler.waitTillComplete()
+        let numCorrect = await doubleBufferHandler.numCorrect
         let fractionCorrect: Double = Double(numCorrect) / Double(numSamples)
         return (fractionCorrect: fractionCorrect, totalCorrect : numCorrect)
     }
@@ -717,6 +724,9 @@ public class Graph {
         //  Get the expected value feed tensor
         let expectedValueFeedTensorInfo = feedTensors.first(where: { $0.name == expectedValueTensorName })
         if (expectedValueFeedTensorInfo == nil) { throw MPSGraphRunErrors.PlaceHolderInputNotFound(expectedValueTensorName) }
+        
+        //  Get the double-buffer handler
+        let doubleBufferHandler = DoubleBufferActor()
 
         //  Lock the dataset
         try await trainingDataSet.lockForMultiSampleUse()
@@ -724,23 +734,34 @@ public class Graph {
         let numSamples = await trainingDataSet.numSamples
         do {
             for sampleIndex in 0..<numSamples {
+                //  Wait for our turn
+                await doubleBufferHandler.getAllowance()
+
                 //  Get the command buffer
                 let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
 
                 //  Get the sample
-                let sample = await trainingDataSet.samples[sampleIndex]
-                
+                let sample = try await trainingDataSet.getSample(sampleIndex: sampleIndex)
+
                 //  Convert the input tensors to MPS version and create the feed dictionary
                 var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [:]
                 feedDict[inputFeedTensorInfo!.tensor] = try sample.inputs.getMPSGraphTensorData(forGraph: self)
                 feedDict[expectedValueFeedTensorInfo!.tensor] = try sample.outputs.getMPSGraphTensorData(forGraph: self)
+
+                //  Create the callback
+                let executionDesc = MPSGraphExecutionDescriptor()
+                executionDesc.completionHandler = { (resultsDictionary, nil) in
+                    Task {
+                        await doubleBufferHandler.operationComplete()
+                    }
+                }
 
                 //  Run the graph
                 let _ = mpsgraph.encode(to: commandBuffer,
                                               feeds: feedDict,
                                               targetTensors: targets,
                                               targetOperations: learningOps,
-                                              executionDescriptor: nil)
+                                              executionDescriptor: executionDesc)
                 commandBuffer.commit()
             }
         }
@@ -750,6 +771,7 @@ public class Graph {
             throw error
         }
         try await trainingDataSet.releaseLock()
+        await doubleBufferHandler.waitTillComplete()
     }
     
     /// Run all samples of a training DataSet through the graph set up for batch running ,  with the variable learning operations enaboed
@@ -989,5 +1011,38 @@ public class Graph {
         
         //  Run the assignment operations
         _ = mpsgraph.run(feeds: feedDict, targetTensors: [], targetOperations: resetOps)
+    }
+}
+
+internal actor DoubleBufferActor {
+    var numOutstandingOperations: Int
+    var numCorrect: Int     //  Used for classification testing
+    
+    init() {
+        numOutstandingOperations = 0
+        numCorrect = 0
+    }
+    
+    func getAllowance() async {
+        while (numOutstandingOperations >= 2) {
+            await Task.yield()
+        }
+        
+        numOutstandingOperations += 1
+    }
+    
+    func operationComplete() {
+        numOutstandingOperations -= 1
+    }
+    
+    func operationComplete(correct: Bool) {
+        if (correct) { numCorrect += 1 }
+        numOutstandingOperations -= 1
+    }
+    
+    func waitTillComplete() async {
+        while (numOutstandingOperations > 0) {
+            await Task.yield()
+        }
     }
 }

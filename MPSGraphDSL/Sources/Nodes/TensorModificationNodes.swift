@@ -2121,3 +2121,175 @@ public class ShapeOfTensor : UnaryNode {
         return [result]
     }
 }
+
+///   Node to move the depth dimension into the space dimensions in blocks
+public class DepthToSpace2D : UnaryNode {
+    let widthAxis: Int
+    let heightAxis: Int
+    let depthAxis: Int
+    let blockSize: Int
+    let usePixelShuffleOrder: Bool
+    let useTensors: Bool
+    let widthAxisTensor: String?
+    let heightAxisTensor: String?
+    let depthAxisTensor: String?
+
+    /// Constructor for a depthToSpace operation with constant dimension indicators
+    /// 
+    ///  - Parameters:
+    ///  - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - widthAxis: The axis that defines the fastest running dimension within the block
+    ///   - heightAxis: The axis that defines the 2nd fastest running dimension within the block
+    ///   - depthAxis: The axis that defines the destination dimension, where to copy the blocks
+    ///   - blockSize: The size of the square spatial sub-block
+    ///   - usePixelShuffleOrder: (Optional) A parameter that controls the layout of the sub-blocks within the depth dimension.  Default is false
+    ///  - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, widthAxis: Int, heightAxis: Int, depthAxis: Int, blockSize: Int, usePixelShuffleOrder: Bool = false, name: String? = nil) {
+        self.widthAxis = widthAxis
+        self.heightAxis = heightAxis
+        self.depthAxis = depthAxis
+        self.blockSize = blockSize
+        self.usePixelShuffleOrder = usePixelShuffleOrder
+        self.useTensors = false
+        self.widthAxisTensor = nil
+        self.heightAxisTensor = nil
+        self.depthAxisTensor = nil
+        super.init(input: input, name: name)
+    }
+
+    /// Constructor for a depthToSpace operation with dimension indicators from tensors
+    ///
+    ///  - Parameters:
+    ///  - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - widthAxisTensor: (Optional) The tensor that provides the axis that defines the fastest running dimension within the block.  If nil the previous node's output will be used
+    ///   - heightAxisTensor: (Optional) The tensor that provides the  axis that defines the 2nd fastest running dimension within the block.  If nil the previous node's output will be used
+    ///   - depthAxisTensor: (Optional) The tensor that provides the axis that defines the destination dimension, where to copy the blocks.  If nil the previous node's output will be used
+    ///   - blockSize: The size of the square spatial sub-block
+    ///   - usePixelShuffleOrder: (Optional) A parameter that controls the layout of the sub-blocks within the depth dimension.  Default is false
+    ///  - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, widthAxisTensor: String?, heightAxisTensor: String?, depthAxisTensor: String?, blockSize: Int, usePixelShuffleOrder: Bool = false, name: String? = nil) {
+        self.widthAxis = 0
+        self.heightAxis = 0
+        self.depthAxis = 0
+        self.blockSize = blockSize
+        self.usePixelShuffleOrder = usePixelShuffleOrder
+        self.useTensors = true
+        self.widthAxisTensor = widthAxisTensor
+        self.heightAxisTensor = heightAxisTensor
+        self.depthAxisTensor = depthAxisTensor
+        super.init(input: input, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+        
+        //  Add to the graph itself
+        if (useTensors) {
+            //  Get the tensors
+            let widthMPSTensor = try graph.getOptionalTensor(widthAxisTensor)
+            let heightMPSTensor = try graph.getOptionalTensor(heightAxisTensor)
+            let depthMPSTensor = try graph.getOptionalTensor(depthAxisTensor)
+            
+            //  Add the node
+            let result = graph.mpsgraph.depth(toSpace2DTensor: inputTensor, widthAxisTensor: widthMPSTensor, heightAxisTensor: heightMPSTensor, depthAxisTensor: depthMPSTensor, blockSize: blockSize, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
+
+            //  Remember the output tensor and shape for later
+            return [result]
+
+        }
+        else {
+            //  Add the node
+            let result = graph.mpsgraph.depth(toSpace2DTensor: inputTensor, widthAxis: widthAxis, heightAxis: heightAxis, depthAxis: depthAxis, blockSize: blockSize, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
+            
+            //  Remember the output tensor and shape for later
+            return [result]
+        }
+    }
+}
+
+///   Node to move the space dimensions into the depth dimension in blocks
+public class SpaceToDepth2D : UnaryNode {
+    let widthAxis: Int
+    let heightAxis: Int
+    let depthAxis: Int
+    let blockSize: Int
+    let usePixelShuffleOrder: Bool
+    let useTensors: Bool
+    let widthAxisTensor: String?
+    let heightAxisTensor: String?
+    let depthAxisTensor: String?
+
+    /// Constructor for a spaceToDepth operation with constant dimension indicators
+    ///
+    ///  - Parameters:
+    ///  - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - widthAxis: The axis that defines the fastest running dimension within the block
+    ///   - heightAxis: The axis that defines the 2nd fastest running dimension within the block
+    ///   - depthAxis: The axis that defines the destination dimension, where to copy the blocks
+    ///   - blockSize: The size of the square spatial sub-block
+    ///   - usePixelShuffleOrder: (Optional) A parameter that controls the layout of the sub-blocks within the depth dimension.  Default is false
+    ///  - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, widthAxis: Int, heightAxis: Int, depthAxis: Int, blockSize: Int, usePixelShuffleOrder: Bool = false, name: String? = nil) {
+        self.widthAxis = widthAxis
+        self.heightAxis = heightAxis
+        self.depthAxis = depthAxis
+        self.blockSize = blockSize
+        self.usePixelShuffleOrder = usePixelShuffleOrder
+        self.useTensors = false
+        self.widthAxisTensor = nil
+        self.heightAxisTensor = nil
+        self.depthAxisTensor = nil
+        super.init(input: input, name: name)
+    }
+
+    /// Constructor for a spaceToDepth operation with dimension indicators from tensors
+    ///
+    ///  - Parameters:
+    ///  - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - widthAxisTensor: (Optional) The tensor that provides the axis that defines the fastest running dimension within the block.  If nil the previous node's output will be used
+    ///   - heightAxisTensor: (Optional) The tensor that provides the  axis that defines the 2nd fastest running dimension within the block.  If nil the previous node's output will be used
+    ///   - depthAxisTensor: (Optional) The tensor that provides the axis that defines the destination dimension, where to copy the blocks.  If nil the previous node's output will be used
+    ///   - blockSize: The size of the square spatial sub-block
+    ///   - usePixelShuffleOrder: (Optional) A parameter that controls the layout of the sub-blocks within the depth dimension.  Default is false
+    ///  - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, widthAxisTensor: String?, heightAxisTensor: String?, depthAxisTensor: String?, blockSize: Int, usePixelShuffleOrder: Bool = false, name: String? = nil) {
+        self.widthAxis = 0
+        self.heightAxis = 0
+        self.depthAxis = 0
+        self.blockSize = blockSize
+        self.usePixelShuffleOrder = usePixelShuffleOrder
+        self.useTensors = true
+        self.widthAxisTensor = widthAxisTensor
+        self.heightAxisTensor = heightAxisTensor
+        self.depthAxisTensor = depthAxisTensor
+        super.init(input: input, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+        
+        //  Add to the graph itself
+        if (useTensors) {
+            //  Get the tensors
+            let widthMPSTensor = try graph.getOptionalTensor(widthAxisTensor)
+            let heightMPSTensor = try graph.getOptionalTensor(heightAxisTensor)
+            let depthMPSTensor = try graph.getOptionalTensor(depthAxisTensor)
+            
+            //  Add the node
+            let result = graph.mpsgraph.space(toDepth2DTensor: inputTensor, widthAxisTensor: widthMPSTensor, heightAxisTensor: heightMPSTensor, depthAxisTensor: depthMPSTensor, blockSize: blockSize, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
+
+            //  Remember the output tensor and shape for later
+            return [result]
+
+        }
+        else {
+            //  Add the node
+            let result = graph.mpsgraph.space(toDepth2DTensor: inputTensor, widthAxis: widthAxis, heightAxis: heightAxis, depthAxis: depthAxis, blockSize: blockSize, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
+            
+            //  Remember the output tensor and shape for later
+            return [result]
+        }
+    }
+}

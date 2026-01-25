@@ -100,8 +100,7 @@ public class ConvolutionLayer: UnaryNode {
     var suffixes: [String] = []
     var targetIndices: [Int] = []
     
-//!!    var testWeights = false
-    var testWeights = true
+    var testWeights = false
 
     /// Constructor for a 2D convolution layer.
     /// Default setup is used.  To change, use supplied modifiers
@@ -188,8 +187,6 @@ public class ConvolutionLayer: UnaryNode {
                 let biasData = biases.getData()
                 let biasName = graph.getFullName(name)! + "_biases"
                 biasTensor = graph.mpsgraph.variable(with: biasData, shape: biasShape.getMPSShape(), dataType: biases.type.getMPSDataType(), name: biasName)
-                suffixes.append("_biases")
-                addedTensors.append(biasTensor)
                 
                 //  If we are adding load or reset assignments, put this variable on the list for load assignments
                 let node = Variable(dataType: .float32, shape: biasShape, randomValueRange: biasRange, name: biasName)
@@ -203,6 +200,8 @@ public class ConvolutionLayer: UnaryNode {
                     graph.learningVariables.append((variable: node, tensor: biasTensor!, loss: lossNode))
                 }
             }
+            suffixes.append("_biases")
+            addedTensors.append(biasTensor)
         }
 
         //  Process 2D convolutions
