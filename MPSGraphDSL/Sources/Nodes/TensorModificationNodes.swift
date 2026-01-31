@@ -1749,7 +1749,7 @@ public class BroadCast : UnaryNode {
         self.shape = shape
         self.shapeTensor = nil
         useShapeTensor = false
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
 
     /// Create a broadcast operation for the given shape
@@ -1761,7 +1761,7 @@ public class BroadCast : UnaryNode {
         self.shape = shape.dimensions
         self.shapeTensor = nil
         useShapeTensor = false
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
 
     /// Create a broadcast operation for the given shape
@@ -1773,7 +1773,7 @@ public class BroadCast : UnaryNode {
         self.shape = []
         self.shapeTensor = shapeTensor
         useShapeTensor = true
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
 
     override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
@@ -1811,7 +1811,7 @@ public class Flatten2D : UnaryNode {
         self.axis = axis
         self.axisTensor = nil
         useAxisTensor = false
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
 
     /// Create a flatten to 2D operation along the axis given by a tensor
@@ -1823,7 +1823,7 @@ public class Flatten2D : UnaryNode {
         self.axis = 0
         self.axisTensor = axisTensor
         useAxisTensor = true
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
 
     override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
@@ -1871,7 +1871,7 @@ public class OneHot : UnaryNode {
         self.onValue = 1.0
         self.offValue = 0.0
         haveValues = false
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
     
     /// Add a one-hot operation to a tensor with a given axis and depth.  Tensor is changed to the type specified
@@ -1889,7 +1889,7 @@ public class OneHot : UnaryNode {
         self.onValue = 1.0
         self.offValue = 0.0
         haveValues = false
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
     
     /// Add a one-hot operation to a tensor with a given axis and depth.  Tensor is changed to the type specified
@@ -1909,7 +1909,7 @@ public class OneHot : UnaryNode {
         self.onValue = onValue
         self.offValue = offValue
         haveValues = true
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
 
     override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
@@ -1965,7 +1965,7 @@ public class Dropout : UnaryNode {
         self.rate = rate
         self.rateTensor = nil
         useRateTensor = false
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
 
     /// Create a dropout operation with the  rate given by a tensor
@@ -1977,7 +1977,7 @@ public class Dropout : UnaryNode {
         self.rate = 0
         self.rateTensor = rateTensor
         useRateTensor = true
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
 
     override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
@@ -2028,7 +2028,7 @@ public class Quantize : UnaryNode {
         self.zeroPointTensor = nil
         useZeroPointTensor = false
         self.axis = 0
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
     
     /// Initializer for a quantization operation - turning float tensor into byte tensor
@@ -2048,7 +2048,7 @@ public class Quantize : UnaryNode {
         self.zeroPointTensor = nil
         useZeroPointTensor = false
         self.axis = axis
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
     
     /// Initializer for a quantization operation - turning float tensor into byte tensor
@@ -2068,7 +2068,7 @@ public class Quantize : UnaryNode {
         self.zeroPointTensor = zeroPointTensor
         useZeroPointTensor = true
         self.axis = axis
-        super.init(name: name)
+        super.init(input: input, name: name)
     }
 
     override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
@@ -2091,6 +2091,112 @@ public class Quantize : UnaryNode {
         }
         else {
             result = graph.mpsgraph.quantize(inputTensor, scale: scale, zeroPoint: zeroPoint, dataType: signed ? .int8 : .uInt8, name: graph.getFullName(name))
+        }
+        
+        //  Remember the output tensor and shape for later
+        return [result]
+    }
+}
+
+///   Node to perform a dequantization operation on a Tensor, turning into a specified type
+public class Dequantize : UnaryNode {
+    let scale: Double
+    let zeroPoint: Double
+    let scaleTensor: String?
+    let useScaleTensor: Bool
+    let zeroPointTensor: String?
+    let useZeroPointTensor: Bool
+    let axis: Int?
+    let dataType: DataType
+    
+    /// Initializer for a dequantization operation - turning quantized tensor into an expanded tensor
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - scale: scale parameter:  result = (value / scale) + zeroPoint
+    ///   - zeroPoint: bias parameter:   result = (value / scale) + zeroPoint
+    ///   - dataType: The type of returned tensor
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, scale: Double, zeroPoint: Double, dataType: DataType, name: String? = nil) {
+        self.scale = scale
+        self.zeroPoint = zeroPoint
+        self.dataType = dataType
+        self.scaleTensor = nil
+        useScaleTensor = false
+        self.zeroPointTensor = nil
+        useZeroPointTensor = false
+        self.axis = nil
+        super.init(input: input, name: name)
+    }
+    
+    /// Initializer for a dequantization operation - turning quantized tensor into an expanded tensor
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - scaleTensor: (Optional)  The name of the tensor that will provide the scale parameter:  result = (value / scale) + zeroPoint.  If nil the previous node's output will be used
+    ///   - zeroPoint: bias parameter:   result = (value / scale) + zeroPoint.  Not used if axis not provided
+    ///   - dataType: The type of returned tensor
+    ///   - axis: (Optional) Axis on which the scale 1D value was broadcasted
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, scaleTensor: String? = nil, zeroPoint: Double, dataType: DataType, axis: Int? = nil, name: String? = nil) {
+        self.scale = 0.0
+        self.zeroPoint = zeroPoint
+        self.dataType = dataType
+        self.scaleTensor = scaleTensor
+        useScaleTensor = true
+        self.zeroPointTensor = nil
+        useZeroPointTensor = false
+        self.axis = axis
+        super.init(input: input, name: name)
+    }
+    
+    /// Initializer for a dequantization operation - turning quantized tensor into an expanded tensor
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - scaleTensor: (Optional)  The name of the tensor that will provide the scale parameter:  result = (value / scale) + zeroPoint.  If nil the previous node's output will be used
+    ///   - zeroPointTensor: (Optional)  The name of the tensor that will provide the zero Point value.  bias parameter:   result = (value / scale) + zeroPoint.   If nil the previous node's output will be used
+    ///   - dataType: The type of returned tensor
+    ///   - axis: (Optional) Axis on which the scale 1D value was broadcasted
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, scaleTensor: String? = nil, zeroPointTensor: String? = nil, dataType: DataType, axis: Int? = nil, name: String? = nil) {
+        self.scale = 0.0
+        self.zeroPoint = 0.0
+        self.dataType = dataType
+        self.scaleTensor = scaleTensor
+        useScaleTensor = true
+        self.zeroPointTensor = zeroPointTensor
+        useZeroPointTensor = true
+        self.axis = axis
+        super.init(input: input, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+        
+        //  Add to the graph itself
+        let result: MPSGraphTensor
+        if (useScaleTensor) {
+            let scaleMPSTensor = try graph.getOptionalTensor(scaleTensor)
+            if (useZeroPointTensor) {
+                let zeroPointMPSTensor = try graph.getOptionalTensor(zeroPointTensor)
+                if let axis = axis {
+                    result = graph.mpsgraph.dequantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPointTensor: zeroPointMPSTensor, dataType: dataType.getMPSDataType(), axis: axis, name: graph.getFullName(name))
+                }
+                else {
+                    result = graph.mpsgraph.dequantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPointTensor: zeroPointMPSTensor, dataType: dataType.getMPSDataType(), name: graph.getFullName(name))
+                }
+            }
+            else {
+                if let axis = axis {
+                    result = graph.mpsgraph.dequantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPoint: zeroPoint, dataType: dataType.getMPSDataType(), axis: axis, name: graph.getFullName(name))
+                }
+                else {
+                    result = graph.mpsgraph.dequantize(inputTensor, scaleTensor: scaleMPSTensor, dataType: dataType.getMPSDataType(), name: graph.getFullName(name))
+                }
+
+            }
+        }
+        else {
+            result = graph.mpsgraph.dequantize(inputTensor, scale: scale, zeroPoint: zeroPoint, dataType: dataType.getMPSDataType(), name: graph.getFullName(name))
         }
         
         //  Remember the output tensor and shape for later
@@ -2287,6 +2393,168 @@ public class SpaceToDepth2D : UnaryNode {
         else {
             //  Add the node
             let result = graph.mpsgraph.space(toDepth2DTensor: inputTensor, widthAxis: widthAxis, heightAxis: heightAxis, depthAxis: depthAxis, blockSize: blockSize, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
+            
+            //  Remember the output tensor and shape for later
+            return [result]
+        }
+    }
+}
+
+///   Node to move the batch dimension into the space dimensions in blocks
+public class BatchToSpace : UnaryNode {
+    let spatialAxis: [Int]
+    let batchAxis: Int
+    let blockDimensions: [Int]
+    let usePixelShuffleOrder: Bool
+    let useTensors: Bool
+    let spatialAxisTensor: String?
+    let batchAxisTensor: String?
+    let blockDimensionsTensor: String?
+
+    /// Constructor for a batchToSpace operation with constant dimension indicators
+    ///
+    ///  - Parameters:
+    ///  - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - spatialAxis: The axes that define the dimensions containing the spatial blocks
+    ///   - batchAxis: The axis that defines the source dimension, where to copy the blocks from
+    ///   - blockSize: The size of the square spatial sub-block
+    ///   - usePixelShuffleOrder: (Optional) A parameter that controls the layout of the sub-blocks within the depth dimension.  Default is false
+    ///  - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, spatialAxis: [Int], batchAxis: Int, blockDimensions: [Int], usePixelShuffleOrder: Bool = false, name: String? = nil) {
+        self.spatialAxis = spatialAxis
+        self.batchAxis = batchAxis
+        self.blockDimensions = blockDimensions
+        self.usePixelShuffleOrder = usePixelShuffleOrder
+        self.useTensors = false
+        self.spatialAxisTensor = nil
+        self.batchAxisTensor = nil
+        self.blockDimensionsTensor = nil
+        super.init(input: input, name: name)
+    }
+
+    /// Constructor for a batchToSpace operation with dimension indicators from tensors
+    ///
+    ///  - Parameters:
+    ///  - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - spatialAxisTensor: (Optional) The tensor that provides the axes that define the dimensions containing the spatial blocks.  If nil the previous node's output will be used
+    ///   - batchAxisTensor: (Optional) The tensor that provides the axis that defines the source dimension, where to copy the blocks from.  If nil the previous node's output will be used
+    ///   - blockDimensionsTensor: (Optional) The tensor that provides the size of the square spatial sub-block.  If nil the previous node's output will be used
+    ///   - usePixelShuffleOrder: (Optional) A parameter that controls the layout of the sub-blocks within the depth dimension.  Default is false
+    ///  - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, spatialAxisTensor: String?, batchAxisTensor: String?, blockDimensionsTensor: String?, usePixelShuffleOrder: Bool = false, name: String? = nil) {
+        self.spatialAxis = []
+        self.batchAxis = 0
+        self.blockDimensions = []
+        self.usePixelShuffleOrder = usePixelShuffleOrder
+        self.useTensors = true
+        self.spatialAxisTensor = spatialAxisTensor
+        self.batchAxisTensor = batchAxisTensor
+        self.blockDimensionsTensor = blockDimensionsTensor
+        super.init(input: input, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+        
+        //  Add to the graph itself
+        if (useTensors) {
+            //  Get the tensors
+            let spatialMPSTensor = try graph.getOptionalTensor(spatialAxisTensor)
+            let batchMPSTensor = try graph.getOptionalTensor(batchAxisTensor)
+            let blockMPSTensor = try graph.getOptionalTensor(blockDimensionsTensor)
+            
+            //  Add the node
+            let result = graph.mpsgraph.batchToSpace(inputTensor, spatialAxesTensor: spatialMPSTensor, batchAxisTensor: batchMPSTensor, blockDimensionsTensor: blockMPSTensor, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
+
+            //  Remember the output tensor and shape for later
+            return [result]
+
+        }
+        else {
+            //  Add the node
+            let result = graph.mpsgraph.batchToSpace(inputTensor, spatialAxes: spatialAxis.map{NSNumber(value: $0)}, batchAxis: batchAxis, blockDimensions: blockDimensions.map{NSNumber(value: $0)}, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
+            
+            //  Remember the output tensor and shape for later
+            return [result]
+        }
+    }
+}
+
+///   Node to move the spatial dimension blocks into the batch dimension
+public class SpaceToBatch : UnaryNode {
+    let spatialAxis: [Int]
+    let batchAxis: Int
+    let blockDimensions: [Int]
+    let usePixelShuffleOrder: Bool
+    let useTensors: Bool
+    let spatialAxisTensor: String?
+    let batchAxisTensor: String?
+    let blockDimensionsTensor: String?
+
+    /// Constructor for a spaceToBatch operation with constant dimension indicators
+    ///
+    ///  - Parameters:
+    ///  - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - spatialAxis: The axes that define the dimensions containing the spatial blocks
+    ///   - batchAxis: The axis that defines the destination dimension, where to copy the blocks from
+    ///   - blockSize: The size of the square spatial sub-block
+    ///   - usePixelShuffleOrder: (Optional) A parameter that controls the layout of the sub-blocks within the depth dimension.  Default is false
+    ///  - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, spatialAxis: [Int], batchAxis: Int, blockDimensions: [Int], usePixelShuffleOrder: Bool = false, name: String? = nil) {
+        self.spatialAxis = spatialAxis
+        self.batchAxis = batchAxis
+        self.blockDimensions = blockDimensions
+        self.usePixelShuffleOrder = usePixelShuffleOrder
+        self.useTensors = false
+        self.spatialAxisTensor = nil
+        self.batchAxisTensor = nil
+        self.blockDimensionsTensor = nil
+        super.init(input: input, name: name)
+    }
+
+    /// Constructor for a spaceToBatch operation with dimension indicators from tensors
+    ///
+    ///  - Parameters:
+    ///  - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - spatialAxisTensor: (Optional) The tensor that provides the axes that define the dimensions containing the spatial blocks.  If nil the previous node's output will be used
+    ///   - batchAxisTensor: (Optional) The tensor that provides the axis that defines the destination dimension, where to copy the blocks from.  If nil the previous node's output will be used
+    ///   - blockDimensionsTensor: (Optional) The tensor that provides the size of the square spatial sub-block.  If nil the previous node's output will be used
+    ///   - usePixelShuffleOrder: (Optional) A parameter that controls the layout of the sub-blocks within the depth dimension.  Default is false
+    ///  - name: (Optional) The name for this node and its associated tensor
+    public init(_ input: String? = nil, spatialAxisTensor: String?, batchAxisTensor: String?, blockDimensionsTensor: String?, usePixelShuffleOrder: Bool = false, name: String? = nil) {
+        self.spatialAxis = []
+        self.batchAxis = 0
+        self.blockDimensions = []
+        self.usePixelShuffleOrder = usePixelShuffleOrder
+        self.useTensors = true
+        self.spatialAxisTensor = spatialAxisTensor
+        self.batchAxisTensor = batchAxisTensor
+        self.blockDimensionsTensor = blockDimensionsTensor
+        super.init(input: input, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+        
+        //  Add to the graph itself
+        if (useTensors) {
+            //  Get the tensors
+            let spatialMPSTensor = try graph.getOptionalTensor(spatialAxisTensor)
+            let batchMPSTensor = try graph.getOptionalTensor(batchAxisTensor)
+            let blockMPSTensor = try graph.getOptionalTensor(blockDimensionsTensor)
+            
+            //  Add the node
+            let result = graph.mpsgraph.spaceToBatch(inputTensor, spatialAxesTensor: spatialMPSTensor, batchAxisTensor: batchMPSTensor, blockDimensionsTensor: blockMPSTensor, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
+
+            //  Remember the output tensor and shape for later
+            return [result]
+
+        }
+        else {
+            //  Add the node
+            let result = graph.mpsgraph.spaceToBatch(inputTensor, spatialAxes: spatialAxis.map{NSNumber(value: $0)}, batchAxis: batchAxis, blockDimensions: blockDimensions.map{NSNumber(value: $0)}, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
             
             //  Remember the output tensor and shape for later
             return [result]

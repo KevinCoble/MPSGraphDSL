@@ -40,6 +40,10 @@ public class SoftMax : UnaryNode {
 public class SoftMaxCrossEntropy : BinaryNode {
     let axis: Int
     let reductionType: MPSGraphLossReductionType
+    
+    var suffixes: [String] = []
+    var targetIndices: [Int] = []
+
     ///  Constructor for a softMax operation across a specified axis of a tensor
     ///
     /// - Parameters:
@@ -59,9 +63,41 @@ public class SoftMaxCrossEntropy : BinaryNode {
         let inputTensors = try graph.getBinaryTensors(firstInputName, secondInputName)
 
         //  Add to the graph itself
-        let softMaxCrossEntropyResult = graph.mpsgraph.softMaxCrossEntropy(inputTensors.firstInputTensor, labels: inputTensors.secondInputTensor, axis: axis, reuctionType: reductionType, name: graph.getFullName(name))
+        var crossEntropyName = graph.getFullName(name)
+        if (graph.batchGraph) {
+            var newName: String = "softMaxCrossEntropy"
+            if (crossEntropyName != nil) { newName = crossEntropyName! + "_softMaxCrossEntropy" }
+            crossEntropyName = newName
+            suffixes = ["_softMaxCrossEntropy"]
+        }
+        else {
+            suffixes = [""]
+        }
+        let softMaxCrossEntropyResult = graph.mpsgraph.softMaxCrossEntropy(inputTensors.firstInputTensor, labels: inputTensors.secondInputTensor, axis: axis, reuctionType: reductionType, name: crossEntropyName)
         
-        //  Remember the output tensor and shape for later
-        return [softMaxCrossEntropyResult]
+        //  If a batch graph, divide the result by the batch size to get an actual loss mean
+        if (graph.batchGraph) {
+            let batchSizeTensor = graph.mpsgraph.constant(Double(graph.batchSize), shape: [1], dataType: softMaxCrossEntropyResult.dataType)
+            suffixes.append("_*Unnamable constant*")
+            let lossMeanTensor = graph.mpsgraph.division(softMaxCrossEntropyResult, batchSizeTensor, name: graph.getFullName(name))
+            suffixes.append("")
+            targetIndices = [2]
+            //  Remember the output tensors for later
+            return [softMaxCrossEntropyResult, batchSizeTensor, lossMeanTensor]
+        }
+        else {
+            //  Remember the output tensor for later
+            targetIndices = [0]
+            return [softMaxCrossEntropyResult]
+        }
+    }
+    
+    override internal func getNodeSuffixes() -> [String] {
+        return suffixes
+    }
+    
+    //  Get the indices for added tensors of target nodes that should be added to the target tensor list - if nil returned all tensors get targetted
+    override internal func getTargetIndices() -> [Int]? {
+        return targetIndices
     }
 }

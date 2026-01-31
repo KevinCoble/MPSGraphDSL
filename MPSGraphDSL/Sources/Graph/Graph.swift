@@ -35,6 +35,7 @@ internal struct feedTensorInfo {
     let name: String
     let tensor: MPSGraphTensor
     let modes: [String]
+    let batchExemption: Bool
     
     func neededForMode(_ mode: String) -> Bool {
         return (modes.isEmpty || modes.contains(mode))
@@ -82,8 +83,10 @@ public class Graph {
     internal var resetOps: [MPSGraphOperation] = []
     internal var learningVariables: [(variable: Variable, tensor: MPSGraphTensor, loss: String)] = []
     internal var seenLearning = false
+    
     ///  Flag for if the graph is built to accomodate batch processing
     public private(set) var batchGraph = false
+    public private(set) var batchSize = 1
 
     //  Learning values
     internal var learningRateConstant = true
@@ -93,17 +96,27 @@ public class Graph {
     internal var learningOps: [MPSGraphOperation] = []
     
     
-    internal init(buildOptions: BuildOptions, nodes: [Node]) {
+    internal init(batchSize: Int, buildOptions: BuildOptions, nodes: [Node]) {
+        self.batchSize = batchSize
+        if (batchSize > 1) { batchGraph = true }
         self.buildOptions = buildOptions
         self.nodes = nodes
     }
     
+    internal func clearReferencedFlags() {
+        for node in nodes {
+            node.clearReferencedFlag()
+        }
+    }
+
     /// Create the MPSGraph object from the nodes in the Graph.  Done automatically from any run or encode operation
     ///
     /// - Throws: `MPSGraphDSLErrors.NamedTensorNotFound` if a referenced tensor name is not found in the Graph's node list
     /// - Throws: `MPSGraphDSLErrors.NodeNotInstantiatedYet` if a referenced tensor name is found in the Graph's node list, but that node has not yet been translated into a tensor
     /// - Throws: `GenericMPSGraphDSLErrors.UnknownShape` The shape of an MPSGraph output tensor was nil, and so could not be verified for correct shape matching
     public func buildGraph() throws {
+        //  Clear the reference list
+        clearReferencedFlags()
         
         //  Create the graph
         mpsgraph = MPSGraph()
@@ -129,6 +142,11 @@ public class Graph {
         //  If no targets, throw
         if (targetTensors.isEmpty) {
             throw MPSGraphDSLErrors.NoTargetsInGraph
+        }
+        
+        //  Check if all the nodes are referenced by another node or a target destination
+        for node in nodes {
+            try node.isReferenced()
         }
         
         //  If learning variables, get the assignment operation
@@ -316,19 +334,8 @@ public class Graph {
     }
     
     internal func getUnaryTensor(name: String? = nil) throws -> MPSGraphTensor {
-        //  If the name is not nil, find the tensor in the graph
-        if let name = name {
-            if let addedNode = findNamedNode(name) {
-                return addedNode.mpstensor
-            }
-            else {
-                throw MPSGraphDSLErrors.NamedTensorNotFound(name)
-            }
-        }
-        
-        //  If the name is nil, return the last output tensor
-        if (lastAddedNode == nil) {throw MPSGraphDSLErrors.NoPreviousNode }
-        return lastAddedNode!.mpstensor
+        let tensor = try getOptionalTensor(name)
+        return tensor
     }
     
     internal func getBinaryTensors(_ name1: String? = nil, _ name2: String? = nil) throws -> (firstInputTensor: MPSGraphTensor, secondInputTensor: MPSGraphTensor) {
@@ -353,6 +360,7 @@ public class Graph {
     internal func getOptionalTensor(_ name: String?) throws -> MPSGraphTensor {
         if let tensorName = name {
             if let addedNode = findNamedNode(tensorName) {
+                addedNode.node.referencedByAnotherNode = true
                 return addedNode.mpstensor
             }
             else {
@@ -362,6 +370,7 @@ public class Graph {
         else {
             //  nil state tensor node name - use last node
             if (lastAddedNode == nil) {throw MPSGraphDSLErrors.NoPreviousNode }
+            lastAddedNode!.node.referencedByAnotherNode = true
             return lastAddedNode!.mpstensor
         }
     }
@@ -374,6 +383,7 @@ public class Graph {
     
     /// Run a single input tensor (or single set if multiple inputs are required) through the graph, returning the output tensors
     ///       If the graph has not been built yet, it is built at the start of this function - see BuildGraph for errors that occur from the build process
+    ///       If the graph is a batch graph, all the input tensors (that are not batch exempt) must be sized with the batch dimension or none of them.  If none, the function will fill a batch tensor with the (assumed) single inputs and extract the single results from the returned batch tensors
     ///       Only use this function if you are only running a few cases.  More that a few hundred can cause memory errors in Metal.  Use 'encodeOne' instead for larger runs
     /// - Parameters:
     ///   - mode: The mode that specifies what output tensors are to be computed
@@ -382,10 +392,22 @@ public class Graph {
     /// - Returns: an array of output tensors that are the result of the graph run
     public func runOne(mode: String, inputTensors: [String : Tensor], newLearningRate: Double? = nil) throws -> [String : Tensor] {
         //  Verify the input tensors are usable
-        for (_, value) in inputTensors {
+        var allAreBatchTensors: Bool = true
+        for (key, value) in inputTensors {
             if (!value.type.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
+            if (batchGraph) {
+                //  Check if we need a batch dimension on the tensor
+                if let feedInfo = feedTensors.first(where: { $0.name == key }) {
+                    if (!feedInfo.batchExemption) {
+                        if (!value.shape.firstDimensionIsBatchSize(batchSize)) { allAreBatchTensors = false }
+                    }
+                }
+                else {
+                    throw MPSGraphRunErrors.PlaceHolderInputNotFound(key)
+                }
+            }
         }
-        
+
         //  Get the graph ready
         if (mpsgraph == nil) { try buildGraph() }
         if (device == nil) { getCommandQueue() }
@@ -400,7 +422,18 @@ public class Graph {
         for feedTensor in feedTensors {
             //  Find the input tensor that matches
             if let inputTensor = inputTensors.first(where: { $0.key == feedTensor.name }) {
-                feedDict[feedTensor.tensor] = try inputTensor.value.getMPSGraphTensorData(forGraph: self)
+                if (!allAreBatchTensors && !feedTensor.batchExemption) {
+                    //  Repeat the tensor batchSize times to make a batch tensor out of it
+                    let batchTensorShape = inputTensor.value.shape.shapeWithAddedBatchDimension(batchSize)
+                    var batchTensor = CreateTensor.constantValues(type: inputTensor.value.type, shape: batchTensorShape, initialValue: 0.0)
+                    for i in 0..<batchSize {
+                        try batchTensor.setBatchSample(tensor: inputTensor.value, batchIndex: i)
+                    }
+                    feedDict[feedTensor.tensor] = try batchTensor.getMPSGraphTensorData(forGraph: self)
+                }
+                else {
+                    feedDict[feedTensor.tensor] = try inputTensor.value.getMPSGraphTensorData(forGraph: self)
+                }
             }
             else {
                 if (feedTensor.neededForMode(mode)) {
@@ -442,11 +475,22 @@ public class Graph {
             }
         }
         
+        //  Convert batch tensors to single output ones where needed
+        if (!allAreBatchTensors) {
+            for (key, value) in resultTensors {
+                if (value.shape.firstDimensionIsBatchSize(batchSize)) {
+                    let singleTensor = try value.getTensorForBatch(0)
+                    resultTensors[key] = singleTensor
+                }
+            }
+        }
+
         return resultTensors
     }
     
     /// Run a single input tensor (or single set if multiple inputs are required) through the graph, returning the output tensors
     ///       If the graph has not been built yet, it is built at the start of this function - see BuildGraph for errors that occur from the build process
+    ///       If the graph is a batch graph, all the input tensors (that are not batch exempt) must be sized with the batch dimension or none of them.  If none, the function will fill a batch tensor with the (assumed) single inputs and extract the single results from the returned batch tensors
     ///       Only use this function if you are only running a few cases.  More that a few hundred can cause memory errors in Metal.  Use 'encodeOne' instead for larger runs
     /// - Parameters:
     ///   - mode: The mode that specifies what output tensors are to be computed
@@ -456,10 +500,22 @@ public class Graph {
     /// - Returns: an array of output tensors that are the result of the graph run
     public func encodeOne(mode: String, inputTensors: [String : Tensor], waitForResults: Bool = true, newLearningRate: Double? = nil) throws -> [String : Tensor] {
         //  Verify the input tensors are usable
-        for (_, value) in inputTensors {
+        var allAreBatchTensors: Bool = true
+        for (key, value) in inputTensors {
             if (!value.type.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
+            if (batchGraph) {
+                //  Check if we need a batch dimension on the tensor
+                if let feedInfo = feedTensors.first(where: { $0.name == key }) {
+                    if (!feedInfo.batchExemption) {
+                        if (!value.shape.firstDimensionIsBatchSize(batchSize)) { allAreBatchTensors = false }
+                    }
+                }
+                else {
+                    throw MPSGraphRunErrors.PlaceHolderInputNotFound(key)
+                }
+            }
         }
-        
+
         //  Get the graph ready
         if (mpsgraph == nil) { try buildGraph() }
         if (device == nil) { getCommandQueue() }
@@ -476,7 +532,18 @@ public class Graph {
         for feedTensor in feedTensors {
             //  Find the input tensor that matches
             if let inputTensor = inputTensors.first(where: { $0.key == feedTensor.name }) {
-                feedDict[feedTensor.tensor] = try inputTensor.value.getMPSGraphTensorData(forGraph: self)
+                if (!allAreBatchTensors && !feedTensor.batchExemption) {
+                    //  Repeat the tensor batchSize times to make a batch tensor out of it
+                    let batchTensorShape = inputTensor.value.shape.shapeWithAddedBatchDimension(batchSize)
+                    var batchTensor = CreateTensor.constantValues(type: inputTensor.value.type, shape: batchTensorShape, initialValue: 0.0)
+                    for i in 0..<batchSize {
+                        try batchTensor.setBatchSample(tensor: inputTensor.value, batchIndex: i)
+                    }
+                    feedDict[feedTensor.tensor] = try batchTensor.getMPSGraphTensorData(forGraph: self)
+                }
+                else {
+                    feedDict[feedTensor.tensor] = try inputTensor.value.getMPSGraphTensorData(forGraph: self)
+                }
             }
             else {
                 if (feedTensor.neededForMode(mode)) {
@@ -523,20 +590,37 @@ public class Graph {
             }
         }
         
+        //  Convert batch tensors to single output ones where needed
+        if (!allAreBatchTensors) {
+            for (key, value) in resultTensors {
+                if (value.shape.firstDimensionIsBatchSize(batchSize)) {
+                    let singleTensor = try value.getTensorForBatch(0)
+                    resultTensors[key] = singleTensor
+                }
+            }
+        }
+
         return resultTensors
     }
     
-    /// Run all samples of a testing dataset through the graph and return the number/percentage correct
+    /// Run all, or a specified set of,  samples of a testing dataset through the graph and return the number/percentage correct
     /// - Parameters:
     ///   - mode: The name of the inference mode of the graph
     ///   - testDataSet: The testing DataSet
     ///   - inputTensorName: The name of the input tensor for the graph (PlaceHolder)
     ///   - resultTensorName: The name of the result tensor for the graph (must be a targe for the mode specified)
+    ///   - sampleRange: (Optional) The range of samples to put into the test.  If nil all samples are used for the test.  Must be divisible by batch size if Graph batch processing in use
     /// - Returns: A tuple with the fraction correct and the total number of samples that classified correctly
-    public func runClassifierTest(mode: String, testDataSet: DataSet, inputTensorName: String, resultTensorName: String) async throws -> (fractionCorrect: Double, totalCorrect : Int) {
+    public func runClassifierTest(mode: String, testDataSet: DataSet, inputTensorName: String, resultTensorName: String, sampleRange: ClosedRange<Int>? = nil) async throws -> (fractionCorrect: Double, totalCorrect : Int) {
         //  Verify the input tensors are usable
         if (!testDataSet.inputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
         if (!testDataSet.outputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
+        
+        //  Verify the number of samples is divisible by the batch size if needed
+        if (batchGraph && sampleRange != nil) {
+            let usedSamples = sampleRange!.upperBound - sampleRange!.lowerBound + 1
+            if ((usedSamples % batchSize) != 0) { throw MPSGraphRunErrors.SampleSizeNotDivisibleByBatchSize }
+        }
 
         //  Get the graph ready
         if (mpsgraph == nil) { try buildGraph() }
@@ -571,33 +655,95 @@ public class Graph {
         //  Lock the dataset
         try await testDataSet.lockForMultiSampleUse()
         
+        //  Get the sample range
         let numSamples = await testDataSet.numSamples
+        let startSample: Int
+        let endSample: Int
+        if let sampleRange = sampleRange {
+            startSample = sampleRange.lowerBound
+            endSample = sampleRange.upperBound
+        }
+        else {
+            startSample = 0
+            endSample = numSamples-1
+        }
+        
+        //  Get the number of runs required
+        var numberOfRuns: Int = endSample - startSample + 1
+        if (batchGraph) {
+            numberOfRuns /= batchSize
+        }
+        
+        //  Create the batch tensor
+        var batchInputTensor: Tensor?
+        if (batchGraph) {
+            let batchInputTensorShape = testDataSet.inputShape.shapeWithAddedBatchDimension(batchSize)
+            batchInputTensor = CreateTensor.constantValues(type: testDataSet.inputType, shape: batchInputTensorShape, initialValue: 0.0)
+        }
+        
         do {
-            for sampleIndex in 0..<numSamples {
+            var sampleIndex: Int = startSample
+            for _ in 0..<numberOfRuns {
                 //  Wait for our turn
                 await doubleBufferHandler.getAllowance()
 
                 //  Get the command buffer
                 let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
                 
-                //  Get the sample
-                let sample = try await testDataSet.getSample(sampleIndex: sampleIndex)
+                //  Get the input Tensor
+                var inputTensor: Tensor
+                var actualClassifications = [Int](repeating: 0, count: batchSize)
+                if (batchGraph) {
+                    for i in 0..<batchSize {
+                        let sample = try await testDataSet.getSample(sampleIndex: sampleIndex)
+                        try batchInputTensor!.setBatchSample(tensor: sample.inputs, batchIndex: i)
+                        actualClassifications[i] = sample.outputClass
+                        sampleIndex += 1
+                    }
+                    inputTensor = batchInputTensor!
+                }
+                else {
+                    let sample = try await testDataSet.getSample(sampleIndex: sampleIndex)
+                    inputTensor = sample.inputs
+                    actualClassifications[0] = sample.outputClass
+                    sampleIndex += 1
+                }
                 
                 //  Convert the input tensor to MPS version and create the feed dictionary
-                let feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try sample.inputs.getMPSGraphTensorData(forGraph: self)]
+                let feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forGraph: self)]
                 
                 //  Create the callback
                 let executionDesc = MPSGraphExecutionDescriptor()
+                let bSize = batchSize
                 executionDesc.completionHandler = { (resultsDictionary, nil) in
                     let result: MPSGraphTensorData = resultsDictionary[outputResultTensor]!
-                    let actual = sample.outputClass
-                    let resultTensor = CreateTensor.fromMPSTensorData(result)
-                    let predictedClass = resultTensor.getClassification()
-//                    if (sampleIndex < 100) { print("sample: \(sampleIndex), predicted: \(predictedClass), actual: \(actual)")}
-                    
-                    Task {
-                        await doubleBufferHandler.operationComplete(correct: predictedClass == actual)
+                    if (bSize == 1) {
+                        let actual = actualClassifications[0]
+                        let resultTensor = CreateTensor.fromMPSTensorData(result)
+                        let predictedClass = resultTensor.getClassification()
+                        
+                        Task {
+                            await doubleBufferHandler.operationComplete(correct: predictedClass == actual)
+                        }
                     }
+                    else {
+                        var numCorrect: Int = 0
+                        let resultTensor = CreateTensor.fromMPSTensorData(result)
+                        for i in 0..<bSize {
+                            let actual = actualClassifications[i]
+                            do {
+                                let predictedClass = try resultTensor.getClassificationForBatch(i)
+                                if (predictedClass == actual) { numCorrect += 1 }
+                            }
+                            catch {
+                                fatalError("Batch index failure in runClassifierTest")
+                            }
+                        }
+                        
+                        Task {
+                            await doubleBufferHandler.operationComplete(numCorrect: numCorrect)
+                        }
+                   }
                 }
 
                 //  Run the graph
@@ -619,66 +765,143 @@ public class Graph {
 
         await doubleBufferHandler.waitTillComplete()
         let numCorrect = await doubleBufferHandler.numCorrect
-        let fractionCorrect: Double = Double(numCorrect) / Double(numSamples)
+        let fractionCorrect: Double = Double(numCorrect) / Double(endSample - startSample + 1)
         return (fractionCorrect: fractionCorrect, totalCorrect : numCorrect)
     }
     
-    /// Run all samples of a testing dataset through a graph set up for batch running and return the number/percentage correct
+    /// Run all, or a specified set of,  samples of a testing dataset through the graph and return the total error value
     /// - Parameters:
     ///   - mode: The name of the inference mode of the graph
     ///   - testDataSet: The testing DataSet
     ///   - inputTensorName: The name of the input tensor for the graph (PlaceHolder)
     ///   - resultTensorName: The name of the result tensor for the graph (must be a targe for the mode specified)
-    ///   - batchSize: The number of samples in a batch
-    /// - Returns: A tuple with the fraction correct and the total number of samples that classified correctly
-    public func runBatchedClassifierTest(mode: String, testDataSet: DataSet, inputTensorName: String, resultTensorName: String, batchSize: Int = 1) async throws -> (fractionCorrect: Double, totalCorrect : Int) {
+    ///   - sampleRange: (Optional) The range of samples to put into the test.  If nil all samples are used for the test.  Must be divisible by batch size if Graph batch processing in use
+    /// - Returns: The total error - the sum of the absolute value of the difference between the predicted and actual values of all elements of the result tensors of all samples specified
+    public func runRegressionTest(mode: String, testDataSet: DataSet, inputTensorName: String, resultTensorName: String, sampleRange: ClosedRange<Int>? = nil) async throws -> Double {
         //  Verify the input tensors are usable
         if (!testDataSet.inputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
         if (!testDataSet.outputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
+        
+        //  Verify the number of samples is divisible by the batch size if needed
+        if (batchGraph && sampleRange != nil) {
+            let usedSamples = sampleRange!.upperBound - sampleRange!.lowerBound + 1
+            if ((usedSamples % batchSize) != 0) { throw MPSGraphRunErrors.SampleSizeNotDivisibleByBatchSize }
+        }
 
         //  Get the graph ready
         if (mpsgraph == nil) { try buildGraph() }
         if (device == nil) { getCommandQueue() }
         
+        //  Get the targetTensors
+        var targets : [MPSGraphTensor] = []
+        for targetTensor in targetTensors {
+            if targetTensor.modes.contains(mode) {
+                targets.append(targetTensor.tensor)
+            }
+        }
+        if (targets.isEmpty) { throw MPSGraphDSLErrors.NoTargetsInGraph }
+        
+        //  Get the input feed tensor
+        let inputFeedTensorInfo = feedTensors.first(where: { $0.name == inputTensorName })
+        if (inputFeedTensorInfo == nil) { throw MPSGraphRunErrors.PlaceHolderInputNotFound(inputTensorName) }
+        
+        //  Get the output result tensor
+        let outputResultTensor: MPSGraphTensor
+        let addedNode = findNamedNode(resultTensorName)
+        if let addedNode = addedNode {
+            outputResultTensor = addedNode.mpstensor
+        }
+        else {
+            throw MPSGraphRunErrors.PlaceHolderInputNotFound(resultTensorName)
+        }
+        
+        //  Get the double-buffer handler
+        let doubleBufferHandler = DoubleBufferActor()
+        
         //  Lock the dataset
         try await testDataSet.lockForMultiSampleUse()
-
+        
+        //  Get the sample range
         let numSamples = await testDataSet.numSamples
-        let numBatches = numSamples / batchSize
-        var sampleIndex: Int = 0
-        var numCorrect: Int = 0
+        let startSample: Int
+        let endSample: Int
+        if let sampleRange = sampleRange {
+            startSample = sampleRange.lowerBound
+            endSample = sampleRange.upperBound
+        }
+        else {
+            startSample = 0
+            endSample = numSamples-1
+        }
+        
+        //  Get the number of runs required
+        var numberOfRuns: Int = endSample - startSample + 1
+        if (batchGraph) {
+            numberOfRuns /= batchSize
+        }
+        
+        //  Create the batch tensor
+        var batchInputTensor: Tensor?
+        var batchOutputTensor: Tensor?
+        if (batchGraph) {
+            let batchInputTensorShape = testDataSet.inputShape.shapeWithAddedBatchDimension(batchSize)
+            batchInputTensor = CreateTensor.constantValues(type: testDataSet.inputType, shape: batchInputTensorShape, initialValue: 0.0)
+            let batchOutputTensorShape = testDataSet.outputShape.shapeWithAddedBatchDimension(batchSize)
+            batchOutputTensor = CreateTensor.constantValues(type: testDataSet.outputType, shape: batchOutputTensorShape, initialValue: 0.0)
+        }
+        
         do {
-            for _ in 0..<numBatches {
-                //  Get the batch sample indices
-                var sampleIndices:  [Int] = []
-                for _ in 0..<batchSize {
-                    sampleIndices.append(sampleIndex)
+            var sampleIndex: Int = startSample
+            for _ in 0..<numberOfRuns {
+                //  Wait for our turn
+                await doubleBufferHandler.getAllowance()
+
+                //  Get the command buffer
+                let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
+                
+                //  Get the input and output Tensors
+                var inputTensor: Tensor
+                var outputTensor: Tensor
+                if (batchGraph) {
+                    for i in 0..<batchSize {
+                        let sample = try await testDataSet.getSample(sampleIndex: sampleIndex)
+                        try batchInputTensor!.setBatchSample(tensor: sample.inputs, batchIndex: i)
+                        try batchOutputTensor!.setBatchSample(tensor: sample.outputs, batchIndex: i)
+                        sampleIndex += 1
+                    }
+                    inputTensor = batchInputTensor!
+                    outputTensor = batchOutputTensor!
+                }
+                else {
+                    let sample = try await testDataSet.getSample(sampleIndex: sampleIndex)
+                    inputTensor = sample.inputs
+                    outputTensor = sample.outputs
                     sampleIndex += 1
                 }
                 
-                //  Get the batch input tensor
-                let tensors = try await testDataSet.getBatch(sampleIndices: sampleIndices)
+                //  Convert the input tensor to MPS version and create the feed dictionary
+                let feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forGraph: self)]
                 
-                //  Run the batch
-                var inputTensors : [String : Tensor] = [:]
-                inputTensors[inputTensorName] = tensors.inputTensor
-                let results = try encodeOne(mode: mode, inputTensors: inputTensors)
-                let result = results[resultTensorName]
-                
-                if let result = result {
-                    for i in 0..<batchSize {
-                        let sample = try await testDataSet.getSample(sampleIndex: i)
-                        let actual = sample.outputClass
-                        let predictedClass = try result.getClassificationForBatch(i)
-                        
-                        if (predictedClass == actual) {
-                            numCorrect += 1
-                        }
+                //  Create the callback
+                let executionDesc = MPSGraphExecutionDescriptor()
+                executionDesc.completionHandler = { (resultsDictionary, nil) in
+                    let result: MPSGraphTensorData = resultsDictionary[outputResultTensor]!
+                    let resultTensor = CreateTensor.fromMPSTensorData(result)
+                    let runError = outputTensor.totalDifference(with: resultTensor)
+                    
+                    Task {
+                        await doubleBufferHandler.operationComplete(error: runError)
                     }
-                }
-                else {
-                    throw MPSGraphRunErrors.ResultTensorNotFound
-                }
+                 }
+
+                //  Run the graph
+                let _ = mpsgraph.encode(to: commandBuffer,
+                                              feeds: feedDict,
+                                              targetTensors: targets,
+                                              targetOperations: nil,
+                                              executionDescriptor: executionDesc)
+
+                commandBuffer.commit()
             }
         }
         catch {
@@ -688,21 +911,30 @@ public class Graph {
         }
         try await testDataSet.releaseLock()
 
-        let fractionCorrect: Double = Double(numCorrect) / Double(batchSize * numBatches)
-        return (fractionCorrect: fractionCorrect, totalCorrect : numCorrect)
+        await doubleBufferHandler.waitTillComplete()
+        let totalError = await doubleBufferHandler.totalError
+        return totalError
     }
-    
-    
+
     /// Run all samples of a training DataSet through the graph, with the variable learning operations enaboed
     /// - Parameters:
     ///   - mode: The name of the learning mode of the graph
     ///   - trainingDataSet: The training DataSet
     ///   - inputTensorName: The name of the input tensor for the graph (PlaceHolder)
     ///   - expectedValueTensorName: The name of the input tensor for the expected value (PlaceHolder)
-    public func runTraining(mode: String, trainingDataSet: DataSet, inputTensorName: String, expectedValueTensorName : String) async throws {
+    ///   - lossTensorName: (Optional) The name of the output tensor for the loss calculation.  This node must be a target for the mode passed in
+    ///   - epochSize: (Optional) The number of random samples, or random batches if a batch graph, the graph is trained on.  If nil all samples are processed sequentially.  Default is nil
+    /// - Returns: The average loss value for the run - or nil if no loss tensor name was provided
+    public func runTraining(mode: String, trainingDataSet: DataSet, inputTensorName: String, expectedValueTensorName : String, lossTensorName: String? = nil, epochSize: Int? = nil) async throws -> Double? {
         //  Verify the input tensors are usable
         if (!trainingDataSet.inputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
         if (!trainingDataSet.outputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
+        
+        //  Verify the number of samples is divisible by the batch size if needed
+        let numSamples = await trainingDataSet.numSamples
+        if (batchGraph && epochSize == nil) {
+            if ((numSamples % batchSize) != 0) { throw MPSGraphRunErrors.SampleSizeNotDivisibleByBatchSize }
+        }
 
         //  Get the graph ready
         if (mpsgraph == nil) { try buildGraph() }
@@ -725,34 +957,100 @@ public class Graph {
         let expectedValueFeedTensorInfo = feedTensors.first(where: { $0.name == expectedValueTensorName })
         if (expectedValueFeedTensorInfo == nil) { throw MPSGraphRunErrors.PlaceHolderInputNotFound(expectedValueTensorName) }
         
+        //  Find the loss tensor, if a name was provided
+        var lossTensor: MPSGraphTensor? = nil
+        if let lossTensorName = lossTensorName {
+            if let addedNode = findNamedNode(lossTensorName) {
+                lossTensor = addedNode.mpstensor
+                if (!targets.contains(lossTensor!)) { throw MPSGraphRunErrors.LossNodeNotATargetForMode(lossTensorName)}
+            }
+            else {
+                throw MPSGraphRunErrors.LossNodeNotFound(lossTensorName)
+            }
+        }
+
         //  Get the double-buffer handler
         let doubleBufferHandler = DoubleBufferActor()
+        
+        //  Create the batch tensors
+        var batchInputTensor: Tensor?
+        var batchOutputTensor: Tensor?
+        if (batchGraph) {
+            let batchInputTensorShape = trainingDataSet.inputShape.shapeWithAddedBatchDimension(batchSize)
+            batchInputTensor = CreateTensor.constantValues(type: trainingDataSet.inputType, shape: batchInputTensorShape, initialValue: 0.0)
+            let batchOutputTensorShape = trainingDataSet.outputShape.shapeWithAddedBatchDimension(batchSize)
+            batchOutputTensor = CreateTensor.constantValues(type: trainingDataSet.inputType, shape: batchOutputTensorShape, initialValue: 0.0)
+        }
 
         //  Lock the dataset
         try await trainingDataSet.lockForMultiSampleUse()
 
-        let numSamples = await trainingDataSet.numSamples
         do {
-            for sampleIndex in 0..<numSamples {
+            var epochCount = numSamples
+            if (batchGraph) { epochCount = numSamples / batchSize }
+            if let epochSize = epochSize { epochCount = epochSize }
+            var sampleIndex = 0
+            for _ in 0..<epochCount {
                 //  Wait for our turn
                 await doubleBufferHandler.getAllowance()
 
                 //  Get the command buffer
                 let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
 
-                //  Get the sample
-                let sample = try await trainingDataSet.getSample(sampleIndex: sampleIndex)
+                //  Get the input and output Tensors
+                var inputTensor: Tensor
+                var outputTensor: Tensor
+                if (batchGraph) {
+                    for i in 0..<batchSize {
+                        let sample: DataSample
+                        if (epochSize == nil) {
+                            sample = try await trainingDataSet.getSample(sampleIndex: sampleIndex)
+                            sampleIndex += 1
+                        }
+                        else {
+                            sampleIndex = Int.random(in: 0..<numSamples)
+                            sample = try await trainingDataSet.getSample(sampleIndex: sampleIndex)
+                        }
+                        try batchInputTensor!.setBatchSample(tensor: sample.inputs, batchIndex: i)
+                        try batchOutputTensor!.setBatchSample(tensor: sample.outputs, batchIndex: i)
+                    }
+                    inputTensor = batchInputTensor!
+                    outputTensor = batchOutputTensor!
+                }
+                else {
+                    let sample: DataSample
+                    if (epochSize == nil) {
+                        sample = try await trainingDataSet.getSample(sampleIndex: sampleIndex)
+                        sampleIndex += 1
+                    }
+                    else {
+                        sampleIndex = Int.random(in: 0..<numSamples)
+                        sample = try await trainingDataSet.getSample(sampleIndex: sampleIndex)
+                    }
+                    inputTensor = sample.inputs
+                    outputTensor = sample.outputs
+                }
 
-                //  Convert the input tensors to MPS version and create the feed dictionary
+                //  Convert the input and output tensors to MPS versions and create the feed dictionary
                 var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [:]
-                feedDict[inputFeedTensorInfo!.tensor] = try sample.inputs.getMPSGraphTensorData(forGraph: self)
-                feedDict[expectedValueFeedTensorInfo!.tensor] = try sample.outputs.getMPSGraphTensorData(forGraph: self)
+                feedDict[inputFeedTensorInfo!.tensor] = try inputTensor.getMPSGraphTensorData(forGraph: self)
+                feedDict[expectedValueFeedTensorInfo!.tensor] = try outputTensor.getMPSGraphTensorData(forGraph: self)
 
                 //  Create the callback
                 let executionDesc = MPSGraphExecutionDescriptor()
                 executionDesc.completionHandler = { (resultsDictionary, nil) in
+                    //  If a loss tensor name was provided, accumulate the loss
+                    var lossValue: Double = 0.0
+                    if let lossTensor = lossTensor {
+                        let result = resultsDictionary[lossTensor]!
+                        let resultTensor = CreateTensor.fromMPSTensorData(result)
+                        let elements = resultTensor.getElements()
+                        for element in elements {
+                            lossValue += element
+                        }
+                    }
                     Task {
-                        await doubleBufferHandler.operationComplete()
+                        await doubleBufferHandler.operationComplete(error: lossValue)
                     }
                 }
 
@@ -772,68 +1070,13 @@ public class Graph {
         }
         try await trainingDataSet.releaseLock()
         await doubleBufferHandler.waitTillComplete()
-    }
-    
-    /// Run all samples of a training DataSet through the graph set up for batch running ,  with the variable learning operations enaboed
-    /// - Parameters:
-    ///   - mode: The name of the learning mode of the graph
-    ///   - trainingDataSet: The training DataSet
-    ///   - inputTensorName: The name of the input tensor for the graph (PlaceHolder)
-    ///   - expectedValueTensorName: The name of the input tensor for the expected value (PlaceHolder)
-    ///   - numBatches: The number of batches to be run
-    ///   - random: If true the samples are shuffled before being added to the batches.  Otherwise the samples are put into batches in the order they are in the DataSet
-    ///   - batchSize: The number of samples in a batch
-    public func runBatchTraining(mode: String, trainingDataSet: DataSet, inputTensorName: String, expectedValueTensorName : String, numBatches: Int, random: Bool = true, batchSize: Int = 1) async throws {
-        //  Verify the input tensors are usable
-        if (!trainingDataSet.inputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
-        if (!trainingDataSet.outputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
-
-        //  Get the graph ready
-        if (mpsgraph == nil) { try buildGraph() }
-        if (device == nil) { getCommandQueue() }
         
-        //  Set up for batch indexing
-        let numSamples = await trainingDataSet.numSamples
-        var sequentialBatchIndex = 0
-        var batchIndices: [Int] = []
-        
-        //  Lock the dataset
-        try await trainingDataSet.lockForMultiSampleUse()
-        
-        do {
-            //  Do for all the batches
-            for _ in 0..<numBatches {
-                //  Get the batch data
-                batchIndices = []
-                if (random) {
-                    for _ in 0..<batchSize {
-                        var index = Int.random(in: 0..<numSamples)
-                        while (batchIndices.contains(index)) { index = Int.random(in: 0..<numSamples)}
-                        batchIndices.append(index)
-                    }
-                }
-                else {
-                    for _ in 0..<batchSize {
-                        batchIndices.append(sequentialBatchIndex)
-                        sequentialBatchIndex += 1
-                        if (sequentialBatchIndex >= numSamples) { sequentialBatchIndex = 0 }
-                    }
-                }
-                let tensors = try await trainingDataSet.getBatch(sampleIndices: batchIndices)
-                
-                //  Run the batch
-                var inputTensors : [String : Tensor] = [:]
-                inputTensors[inputTensorName] = tensors.inputTensor
-                inputTensors[expectedValueTensorName] = tensors.outputTensor
-                _ = try encodeOne(mode: mode, inputTensors: inputTensors, waitForResults: false)
-            }
+        if (lossTensorName == nil) {
+            return nil
         }
-        catch {
-            //  Make sure we release the dataset.  Cannot use defer with actor isolated code
-            try await trainingDataSet.releaseLock()
-            throw error
+        else {
+            return await doubleBufferHandler.totalError
         }
-        try await trainingDataSet.releaseLock()
     }
     
     /// Print each added node's shape, in order, with node names if available.  This is convenient for debugging a Graph
@@ -1017,10 +1260,12 @@ public class Graph {
 internal actor DoubleBufferActor {
     var numOutstandingOperations: Int
     var numCorrect: Int     //  Used for classification testing
-    
+    var totalError: Double     //  Used for regression testing and loss accumulation
+
     init() {
         numOutstandingOperations = 0
         numCorrect = 0
+        totalError = 0.0
     }
     
     func getAllowance() async {
@@ -1040,6 +1285,16 @@ internal actor DoubleBufferActor {
         numOutstandingOperations -= 1
     }
     
+    func operationComplete(numCorrect: Int) {
+        self.numCorrect += numCorrect
+        numOutstandingOperations -= 1
+    }
+    
+    func operationComplete(error: Double) {
+        self.totalError += error
+        numOutstandingOperations -= 1
+    }
+
     func waitTillComplete() async {
         while (numOutstandingOperations > 0) {
             await Task.yield()

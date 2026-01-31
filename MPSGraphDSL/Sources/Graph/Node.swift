@@ -14,6 +14,7 @@ public class Node {
     let name: String?
     var targetModes : [String] = []
     var buildError : Error? = nil
+    var referencedByAnotherNode: Bool = false
     
     init(name: String? = nil) {
         self.name = name
@@ -44,5 +45,23 @@ public class Node {
     //  Get the indices for added tensors of target nodes that should be added to the target tensor list - if nil returned all tensors get targetted
     internal func getTargetIndices() -> [Int]? {
         return nil
+    }
+    
+    //  Clear the referenced flag
+    internal func clearReferencedFlag() {
+        referencedByAnotherNode = false
+    }
+    
+    //  Verify we are referenced
+    internal func isReferenced() throws {
+        if (!referencedByAnotherNode && targetModes.isEmpty) {
+            var nameString = "* Unnamed *"
+            if let name = name {
+                nameString = name
+            }
+            var opName = String(describing: self)
+            if (opName.starts(with: "MPSGraphDSL.")) { opName = String(opName.trimmingPrefix("MPSGraphDSL.")) }
+            throw MPSGraphDSLErrors.UnreferencedNode("Node: \(opName) name: \(nameString)")
+        }
     }
 }

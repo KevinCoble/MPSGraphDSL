@@ -24,6 +24,8 @@ MPSGraphDSL Graphs are mostly just a wrapper for Apple's MPSGraph objects.  The 
 
 Additionally there are some MPSGraphDSL specific nodes that are added to make common operations simpler.  An example of this is the ``FullyConnectedLayer``, a fully-connected neural network layer with weights, matrix multiplication, bias terms and activation functions.  While all of these parts can be manually put in, or a ``SubGraph`` created (explained below), it was deemed common enough to make a single node for ease of use.
 
+Nodes are checked for use.  If a node is not referenced by another node, and is not a target for an operation (described below), an error will be thrown
+
 #### Targets
 
 At least one node in a Graph must be designated as a target, although many can be.  Targets are the outputs of the Graph, so any data coming out of the system comes through a target node.  MPSGraph uses the designated targets to determine the calculation paths that will be performed.  A neural network likely has an inference output that would be a target, but also a loss calculation when learning that would also be a target.  Since which one of these these is the result desired depends on what you are doing, training with learning operations or infering an output for testing or after training is complete, targets are mode dependent.
@@ -35,6 +37,8 @@ Any node can be designated as a target.  To do so use a 'targetForModes' modifie
 A ``PlaceHolder`` is a 'leaf' node, a node with no inputs from other nodes in the Graph so data only flows out of it.  A PlaceHolder, as the name implies, holds the place in the Graph where external inputs will be present when the Graph is performing calculations.  PlaceHolders also are required to be named.  When you 'run' the Graph you provide a dictionary of Tensors keyed by the PlaceHolder names for the inputs needed.
 
 Some inputs to a Graph may not be needed for all modes.  For example, the expected value of a neural network is needed for the loss calculation, but not for the inference result.  Therefore you can limit what PlaceHolders need to be filled for each mode.  By default a PlaceHolder is required to be filled for all modes, but you can use an optional parameter on initialization to specify what modes it is actually required for.
+
+When creating a Graph to take batch input (described below) you don't add the batch dimension to the PlaceHolder shape, it will be done automatically for you by the Graph build system.  The Tensors passed in will be concatenated together for a batch and passed to the auto-modified placeholder.  There are times where you don't want a PlaceHolder to be automatically adjusted for handling batch input, such as when adding adjustment constants and the like.  For these cases there is a 'isBatchExempt' modifier that tells the Graph build system to not extend the shape to cover a batch dimension.
 
 ##  Creating a Graph
 
@@ -242,7 +246,28 @@ This is the special ``Learning`` node for MPSGraphDSL.  When it is present the G
 
 End of the Graph definition.
 
-Discussion of how to use this graph is in the next section.
+Discussion of how to use this graph is in a following section.
+
+##  Batch Graphs
+
+Often Graphs are created to run multiple data samples through them between Variable updates.  The input Tensors are concatenated together into a 'batch' version that is passed to the Graph.  This speeds up processing as the number of data transfers between the CPU and the GPU is reduced, even though the amount of data remains the same.
+
+To try to make this process easy, Graphs can be built in 'batch' mode.  When a batch Graph is being built, all PlaceHolders that are not marked as exempt automatically have a batch dimension prepended to the shape.  Creating a batch Graph just requires specification of the batch size on the initializer.  The following code creates a batch Graph that processes 16 samples at once:
+
+```swift
+graph = Graph(batchSize: 16) {
+    PlaceHolder(shape: [28, 28], name: "input")
+    .
+    .
+    .
+    SoftMax(name: "result")
+        .targetForModes(["infer"])
+}
+```
+
+The PlaceHolder takes an 28x28 input image.  When the Graph is used a 16x28x28 Tensor will be passed to the Graph, with 16 samples (of shape \[28, 28\]) concatenated together to make the batch.  Any result Tensors may have a batch dimension as well, so check rather than assume.  Testing and Training functions on the Graph will automatically take care of the batch dimension.
+
+Many neural network nodes like FullyConnectedLayer, ConvolutionLayer, etc. deal with batch dimension tensors by running each batch sample through the operations with weight/bias variables that are not expanded for the batch size.  This means you can create a Graph to train/test with the speed inprovement of batch processing, but put the same weights and biases into a future Graph (with the same structure of nodes) that does not require batch inputs for user inference runs.
 
 ##  Running Operations with the Graph
 
@@ -287,20 +312,22 @@ let result = try resultTensor!.getElement(index: 0).asDouble
 
 ###  Running an Entire DataSet for Classification
 
-Graph has methods to run an entire ``DataSet`` through with the results being handled as a classification.  There are testing and training methods, with the testing method returning a fraction correct value and the training mode doing learning operations.  Our example above isn't a classification problem so the following code assumes a different Graph and a two full DataSets that have the testing and training data for that Graph:
+Graph has methods to run an entire ``DataSet`` through with the results being handled as a classification or regression problem.  There are testing and training methods, with the testing method returning a fraction correct value for classification or total absolute error for regression, and the training mode doing learning operations.  Our example above isn't a classification problem so the following code assumes a different Graph and a two full DataSets that have the testing and training data for that Graph:
 
 ```swift
 let result = try classificationGraph.runClassifierTest(mode: "infer", testDataSet: testDataSet, inputTensorName: "inputs", resultTensorName: "inferenceResult")
 print("Initial test percentage: \(result.fractionCorrect*100.0)")
 ```
 
-This method runs all samples in DataSet 'testDataSet' through the Graph 'classificationGraph' in mode "infer", returning a tuple with the number of classifications that succeeded and a fraction value using the number of samples.  The input and result node names must be identified so the method can set up the input dictionary and extract the results appropriately.
+This method runs all samples in DataSet 'testDataSet' through the Graph 'classificationGraph' in mode "infer", returning a tuple with the number of classifications that succeeded and a fraction value using the number of samples.  The input and result node names must be identified so the method can set up the input dictionary and extract the results appropriately.  Optional parameters on the function allow you to use a subset of the training DataSet as the test inputs.  Optional parameters allow the range of samples (or batches) used for the testing to be specified.  The method 'runRegressionTest' performs a similar operation for regression problems, returning the total absolute difference for the error value.
 
 ```swift
-try classificationGraph.runTraining(mode: "learn", trainingDataSet: trainingDataSet, inputTensorName: "inputs", expectedValueTensorName: "expectedValue")
+_ = try await classificationGraph.runTraining(mode: "learn", trainingDataSet: trainingDataSet, inputTensorName: "inputs", expectedValueTensorName: "expectedValue")
 ```
 
-This method runs all samples in DataSet 'trainingDataSet' through the graph 'classificationGraph' in mode "learn", performing the learning operations and updating any Variables that are marked to learn versus a loss function.  The input values an expected result nodes must be identified so the method can set up the input dictionary with both PlaceHolder tensors.
+This method runs all samples in DataSet 'trainingDataSet' through the graph 'classificationGraph' in mode "learn", performing the learning operations and updating any Variables that are marked to learn versus a loss function.  The input values an expected result nodes must be identified so the method can set up the input dictionary with both PlaceHolder tensors.  Optional parameters on the function allow you to use a subset of the training DataSet as the test inputs and to request the total loss for the run to be returned.
+
+All of these functions can be used with batch Graphs.  In these cases the number of samples for testing must be a multiple of the batch size and the epoch size for training indicates the number of batches run, rather than individual samples.
 
 ##  SubGraphs
 

@@ -53,6 +53,10 @@ public class Learning : Node {
             return [inputPlaceholder]
         }
     }
+    
+    override internal func isReferenced() throws {
+        //  Don't throw
+    }
 }
 
 

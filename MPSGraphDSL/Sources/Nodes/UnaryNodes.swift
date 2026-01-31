@@ -13,7 +13,7 @@ import MetalPerformanceShadersGraph
 public class UnaryNode: Node {
     let inputName: String?
     
-    init(input: String? = nil, name: String? = nil) {
+    init(input: String?, name: String?) {
         inputName = input
         super.init(name: name)
     }

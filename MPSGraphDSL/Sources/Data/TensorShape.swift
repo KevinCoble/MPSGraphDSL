@@ -66,6 +66,27 @@ public struct TensorShape : Equatable, Sendable
         }
     }
     
+    /// Determine if the shape starts with the passed in batch size
+    /// - Parameter batchSize: The batch size to check the shape agains
+    /// - Returns: true if the shape starts with the specified size, else false
+    public func firstDimensionIsBatchSize(_ batchSize: Int) -> Bool {
+            if (dimensions[0] ==  batchSize) { return true }
+            return false
+    }
+    
+    public func shapeWithRemovedBatchDimension() -> TensorShape {
+        if (dimensions.count <= 1) { return self }
+        var newDimensions = dimensions
+        newDimensions.removeFirst()
+        return TensorShape(newDimensions)
+    }
+    
+    public func shapeWithAddedBatchDimension(_ batchSize: Int) -> TensorShape {
+        var newDimensions = dimensions
+        newDimensions.insert(batchSize, at: 0)
+        return TensorShape(newDimensions)
+    }
+
     ///  Get the total number of elements specified by the Tensor Shape
     public var totalSize : Int {
         get {

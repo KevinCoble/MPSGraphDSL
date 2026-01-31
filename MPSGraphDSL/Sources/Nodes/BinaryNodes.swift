@@ -14,7 +14,7 @@ public class BinaryNode: Node {
     let firstInputName: String?
     let secondInputName: String?
     
-    init(firstInput: String? = nil, secondInput: String? = nil, name: String? = nil) {
+    init(firstInput: String?, secondInput: String?, name: String?) {
         firstInputName = firstInput
         secondInputName = secondInput
         super.init(name: name)

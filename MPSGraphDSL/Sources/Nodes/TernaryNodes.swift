@@ -16,7 +16,7 @@ public class TernaryNode: Node {
     let secondInputName: String?
     let thirdInputName: String?
 
-    init(firstInput: String? = nil, secondInput: String? = nil, thirdInput: String? = nil, name: String? = nil) {
+    init(firstInput: String?, secondInput: String?, thirdInput: String?, name: String?) {
         firstInputName = firstInput
         secondInputName = secondInput
         thirdInputName = thirdInput

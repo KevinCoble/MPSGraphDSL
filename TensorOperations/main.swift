@@ -33,10 +33,10 @@ let broadcast = false
 let flatten = false
 let onehot = false
 let dropout = false
-let quantize = false
+let quantize = true
 let pool = false
 let shapeOf = false
-let depthToSpace = true
+let depthToSpace = false
 
 if matrixMultiplication {
     let MMvectorTensor = try TensorFloat32(shape: TensorShape([2]), initialValues: [7.0, 8.0])
@@ -691,17 +691,28 @@ if (quantize) {
     let result = results["result"]!
     try result.print2D(elementWidth: 6, precision: 0)
     
-    let quantizeGraph2 = Graph {
-        Constant(values: initialTensor, name: "startTensor")
-        Constant(shape: [5], value: Float32(1.0 / 255.0), name: "scaleConstant")
-        Quantize("startTensor", scaleTensor: "scaleConstant", zeroPoint: 3.0, signed: false, axis: 0, name: "result")
-            .targetForModes(["quantizeTest"])
+//    let quantizeGraph2 = Graph {
+//        Constant(values: initialTensor, name: "startTensor")
+//        Constant(shape: [5], value: Float32(1.0 / 255.0), name: "scaleConstant")
+//        Quantize("startTensor", scaleTensor: "scaleConstant", zeroPoint: 3.0, signed: false, axis: 0, name: "result")
+//            .targetForModes(["quantizeTest"])
+//    }
+//
+//    print("Quantize with tensor scale = 1/255, zeropoint = 3, axis = 0")
+//    let results2 = try quantizeGraph2.runOne(mode: "quantizeTest", inputTensors: [:])
+//    let result2 = results2["result"]!
+//    try result2.print1D(elementWidth: 6, precision: 1)
+    
+    let dequantizeGraph = Graph {
+        Constant(values: result, name: "quantizedTensor")
+        Dequantize("quantizedTensor", scale: 1.0 / 255.0, zeroPoint: 0.0, dataType: .float32, name: "result")
+            .targetForModes(["dequantizeTest"])
     }
 
-    print("Quantize with tensor scale = 1/255, zeropoint = 3, axis = 0")
-    let results2 = try quantizeGraph2.runOne(mode: "quantizeTest", inputTensors: [:])
-    let result2 = results2["result"]!
-    try result2.print1D(elementWidth: 6, precision: 1)
+    print("De-Quantize above quantized tensor")
+    let results3 = try dequantizeGraph.runOne(mode: "dequantizeTest", inputTensors: [:])
+    let result3 = results3["result"]!
+    try result3.print2D(elementWidth: 6, precision: 1)
 
 }
 

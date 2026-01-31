@@ -15,6 +15,19 @@ public class SubGraphDefinition {
     internal init(nodes: [Node]) {
         self.nodes = nodes
     }
+    
+    internal func clearReferencedFlags() {
+        for node in nodes {
+            node.clearReferencedFlag()
+        }
+    }
+    
+    internal func nodesAreReferenced() throws {
+        for node in nodes {
+            try node.isReferenced()
+        }
+
+    }
 }
 
 
@@ -73,5 +86,18 @@ public class SubGraph : Node {
         graph.dataTensorMap = oldDataTensorMap
         
         return [nil]
+    }
+    
+    //  Clear the referenced flag
+    override internal func clearReferencedFlag() {
+        referencedByAnotherNode = false
+        
+        //  Clear all the sub-graph nodes
+        subGraphDef.clearReferencedFlags()
+    }
+    
+    //  Verify the subgraph nodes are referenced
+    override internal func isReferenced() throws {
+        try subGraphDef.nodesAreReferenced()
     }
 }

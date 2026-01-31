@@ -211,7 +211,7 @@ print("Initial test percentage: \(result.fractionCorrect*100.0)")
 
 //:  Train the network by running through all the training data 500 times.  Note that the mode is 'learn', so the loss function is calculated and weights and biases updated
 for _ in 0..<500 {
-    try await graph.runTraining(mode: "learn", trainingDataSet: trainingDataSet, inputTensorName: "inputs", expectedValueTensorName: "expectedValue")
+    _ = try await graph.runTraining(mode: "learn", trainingDataSet: trainingDataSet, inputTensorName: "inputs", expectedValueTensorName: "expectedValue")
 }
 
 //:  Get the final accuracy by running the test data set through again

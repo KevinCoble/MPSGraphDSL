@@ -30,7 +30,7 @@ public protocol Tensor : Sendable {
     mutating func setBatchSample(tensor: Tensor, batchIndex: Int) throws
     func getValuesForBatch(_ batchIndex: Int) throws -> [Double]
     func getClassificationForBatch(_ batchIndex: Int) throws -> Int
-    
+    func getTensorForBatch(_ batchIndex: Int) throws -> Tensor
 
     //  Run functions
     func getData() -> Data
@@ -51,6 +51,23 @@ extension Tensor {
         }
         return true
     }
+    
+    /// Get the total difference (sum of absolute value of difference between each element) of this tensor with another of the same shape and size
+    /// - Parameter with: The tensor to calculate the difference value with
+    /// - Returns: The total difference value, or infinite if the tensor shapes do not match
+    public func totalDifference(with: Tensor) -> Double {
+        if (self.shape != with.shape) { return .infinity }
+        
+        var totalDifference = 0.0
+        let ourElements : [Double] = getElements()
+        let otherElements : [Double] = with.getElements()
+        for i in 0..<ourElements.count {
+            totalDifference += abs(ourElements[i] - otherElements[i])
+        }
+        
+        return totalDifference
+    }
+
     
     
     /// Print out a 1-dimensional (vector) tensor as a string of values with specified width and precision, enclosed in square brackets
@@ -331,7 +348,7 @@ public struct TensorDouble : Tensor {
         var argmax = 0
         var maxValue = -Double.greatestFiniteMagnitude
         for i in 0..<dataSize {
-            if (elements[i]) > maxValue {
+            if (elements[i] > maxValue) {
                 maxValue = elements[i]
                 argmax = i
             }
@@ -485,6 +502,20 @@ public struct TensorDouble : Tensor {
         }
         
         return argmax
+    }
+    
+    /// Create a tensor from extracted batch data.
+    /// - Parameter batchIndex: The index within the batch (first) dimension to extract the data from
+    /// - Returns: A tensor of the size of this tensor minus the batch dimension, filled with the data for the specified batch index
+    public func getTensorForBatch(_ batchIndex: Int) throws -> Tensor {
+        if (shape.numDimensions < 2) { throw MPSGraphRunErrors.NotABatchTensor }
+        if (batchIndex < 0 || batchIndex > shape.dimensions[0]) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        let outputShape = shape.shapeWithRemovedBatchDimension()
+        let dataSize = outputShape.totalSize
+        let startIndex = dataSize * batchIndex
+        let batchValues = Array(elements[startIndex..<startIndex+dataSize])
+        let resultTensor = try TensorDouble(shape: outputShape, initialValues: batchValues)
+        return resultTensor
     }
 
 
@@ -662,7 +693,7 @@ public struct TensorFloat32 : Tensor {
         var argmax = 0
         var maxValue = -Float32.greatestFiniteMagnitude
         for i in 0..<dataSize {
-            if (elements[i]) > maxValue {
+            if (elements[i] > maxValue) {
                 maxValue = elements[i]
                 argmax = i
             }
@@ -842,6 +873,20 @@ public struct TensorFloat32 : Tensor {
         
         return argmax
     }
+    
+    /// Create a tensor from extracted batch data.
+    /// - Parameter batchIndex: The index within the batch (first) dimension to extract the data from
+    /// - Returns: A tensor of the size of this tensor minus the batch dimension, filled with the data for the specified batch index
+    public func getTensorForBatch(_ batchIndex: Int) throws -> Tensor {
+        if (shape.numDimensions < 2) { throw MPSGraphRunErrors.NotABatchTensor }
+        if (batchIndex < 0 || batchIndex > shape.dimensions[0]) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        let outputShape = shape.shapeWithRemovedBatchDimension()
+        let dataSize = outputShape.totalSize
+        let startIndex = dataSize * batchIndex
+        let batchValues = Array(elements[startIndex..<startIndex+dataSize])
+        let resultTensor = try TensorFloat32(shape: outputShape, initialValues: batchValues)
+        return resultTensor
+    }
 
 
     // MARK: - Persistance functions
@@ -1020,7 +1065,7 @@ public struct TensorUInt8 : Tensor {
         var argmax = 0
         var maxValue = UInt8.min
         for i in 0..<dataSize {
-            if (elements[i]) >= maxValue {
+            if (elements[i] >= maxValue) {
                 maxValue = elements[i]
                 argmax = i
             }
@@ -1201,6 +1246,20 @@ public struct TensorUInt8 : Tensor {
         }
         
         return argmax
+    }
+    
+    /// Create a tensor from extracted batch data.
+    /// - Parameter batchIndex: The index within the batch (first) dimension to extract the data from
+    /// - Returns: A tensor of the size of this tensor minus the batch dimension, filled with the data for the specified batch index
+    public func getTensorForBatch(_ batchIndex: Int) throws -> Tensor {
+        if (shape.numDimensions < 2) { throw MPSGraphRunErrors.NotABatchTensor }
+        if (batchIndex < 0 || batchIndex > shape.dimensions[0]) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        let outputShape = shape.shapeWithRemovedBatchDimension()
+        let dataSize = outputShape.totalSize
+        let startIndex = dataSize * batchIndex
+        let batchValues = Array(elements[startIndex..<startIndex+dataSize])
+        let resultTensor = try TensorUInt8(shape: outputShape, initialValues: batchValues)
+        return resultTensor
     }
 
     // MARK: - Persistance functions

@@ -98,6 +98,8 @@ public enum MPSGraphDSLErrors : Error {
     case NodeCannotBeTarget
     ///  The Graph must contain at least one node that is a target.  Naming the last node will automatically make it a target
     case NoTargetsInGraph
+    ///  A node was found that was not referenced by another node, and was not a target: therefore is unused.
+    case UnreferencedNode(String)
     ///  Only one Learning node is allowed per graph
     case MoreThanOneLearningNode
     ///  The tensor does not contain the dimension chosen for an operation
@@ -148,6 +150,8 @@ public enum MPSGraphNeuralNetErrors : Error {
 
 ///  Errors that can be thrown by the MPSGraph run system
 public enum MPSGraphRunErrors : Error {
+    ///  The Graph was not built as a batch graph
+    case NotABatchGraph
     ///  The tensor having a sample added to it does not have enough dimensions to be a batch tensor
     case NotABatchTensor
     ///  The tensor being added to a batch tensor does not have the correct shape
@@ -158,6 +162,12 @@ public enum MPSGraphRunErrors : Error {
     case PlaceHolderInputNotFound(String)
     ///  The graph was not built with the required option for the operation
     case GraphNotBuiltForOperation(String)
+    ///  The graph was built for batch operation but the number of samples is not divisible by the batch size
+    case SampleSizeNotDivisibleByBatchSize
+    ///  The specified loss node was not found in the Graph
+    case LossNodeNotFound(String)
+    ///  The specified loss node was not fa target for the run mode
+    case LossNodeNotATargetForMode(String)
 }
 
 ///  Errors that can be thrown by the persistance subsystem

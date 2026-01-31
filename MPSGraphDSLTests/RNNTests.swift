@@ -57,7 +57,7 @@ struct RNNTests {
             
             //  Train
             for _ in 0..<200 {
-                try await graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
+                _ = try await graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
             }
 
             //  Now see how many have the correct sign
@@ -123,7 +123,7 @@ struct RNNTests {
             
             //  Train
             for _ in 0..<200 {
-                try await graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
+                _ = try await graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
             }
 
             //  Run an input in
@@ -197,7 +197,7 @@ struct RNNTests {
             
             //  Train
             for _ in 0..<20 {
-                try await graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
+                _ = try await graph.runTraining(mode: "learn", trainingDataSet: dataSet, inputTensorName: "input", expectedValueTensorName : "expectedValue")
             }
 
             //  Now see how many have the correct sign

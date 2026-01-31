@@ -60,14 +60,28 @@ public class FullyConnectedLayer : UnaryNode {
         else {
             throw GenericMPSGraphDSLErrors.UnknownShape
         }
+        
+        //  If this is a batch graph, get the input shape minus the batch dimension
+        var batchedInput = false
+        var neededInputShape: TensorShape? = nil
+        if (graph.batchGraph && inputShape.firstDimensionIsBatchSize(graph.batchSize)) {
+            batchedInput = true
+            inputShape = inputShape.shapeWithRemovedBatchDimension()
+            neededInputShape = TensorShape([graph.batchSize, inputShape.totalSize]) // reshape the input tensor to a [batchSize, x]
+        }
+        else {
+            //  Not a batch input anymore, just reshape to [1, x], where x is the input length
+            if (inputShape.numDimensions != 2 || inputShape.dimensions[0] != 1) {
+                neededInputShape = TensorShape([1, inputShape.totalSize])
+            }
+        }
 
-        //  See if we have to reshape the input tensor to a [1, x], where x is the input length
+        //  See if we have to reshape the input tensor
         let inputReshapeTensor : MPSGraphTensor
-        if (inputShape.numDimensions != 2 || inputShape.dimensions[0] != 1) {
+        if let neededInputShape = neededInputShape {
             //  Add a reshape node
             let reshapeName = graph.getFullName(name)! + "_inputReshape"
-            let newShape = TensorShape([1, inputShape.totalSize])
-            inputReshapeTensor = graph.mpsgraph.reshape(inputTensor, shape: newShape.getMPSShape(), name: reshapeName)
+            inputReshapeTensor = graph.mpsgraph.reshape(inputTensor, shape: neededInputShape.getMPSShape(), name: reshapeName)
             addedTensors.append(inputReshapeTensor)
             suffixes.append("_inputReshape")
         }
@@ -138,13 +152,19 @@ public class FullyConnectedLayer : UnaryNode {
         let matrixMultTensor = graph.mpsgraph.matrixMultiplication(primary: inputReshapeTensor, secondary: weightTensor, name: matrixTensorName)
         addedTensors.append(matrixMultTensor)
         
-        //  If the shape isn't the output shape, reshape to it
+        //  Get the output shape - with batch dimension if needed
+        var desiredOutputShape = outputShape
+        if (batchedInput) {
+            desiredOutputShape = outputShape.shapeWithAddedBatchDimension(graph.batchSize)
+        }
+        
+        //  If the shape isn't the output shape (with possible batch prefix), reshape to it
         let matrixMultResult: MPSGraphTensor
         if let matrixMultShape = matrixMultTensor.shape {
-            if (!outputShape.matchesMPSShape(matrixMultShape)) {
+            if (!desiredOutputShape.matchesMPSShape(matrixMultShape)) {
                 //  Add a reshape node
                 let reshapeName = graph.getFullName(name)! + "_outputReshape"
-                let outputReshapeTensor = graph.mpsgraph.reshape(matrixMultTensor, shape: outputShape.getMPSShape(), name: reshapeName)
+                let outputReshapeTensor = graph.mpsgraph.reshape(matrixMultTensor, shape: desiredOutputShape.getMPSShape(), name: reshapeName)
                 addedTensors.append(outputReshapeTensor)
                 suffixes.append("_outputReshape")
                 matrixMultResult = outputReshapeTensor
