@@ -236,7 +236,7 @@ public class Maximum : BinaryNode {
     ///
     /// - Parameters:
     ///   - firstInput: (Optional) The name of the tensor that will provide the first operand.  If nil the previous node's output will be used
-    ///   - secondInput: (Optional) The name of the tensor that will provide the second operand (the power to raise the first operand to).  If nil the previous node's output will be used
+    ///   - secondInput: (Optional) The name of the tensor that will provide the second operand.  If nil the previous node's output will be used
     ///   - propogateNaNs: (Optional) If true, NaN values will be propogated, otherwise they will not.  Default is false
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(firstInput: String? = nil, secondInput: String? = nil, propogateNaNs: Bool = false, name: String? = nil) {
@@ -267,7 +267,7 @@ public class Minimum : BinaryNode {
     ///
     /// - Parameters:
     ///   - firstInput: (Optional) The name of the tensor that will provide the first operand.  If nil the previous node's output will be used
-    ///   - secondInput: (Optional) The name of the tensor that will provide the second operand (the power to raise the first operand to).  If nil the previous node's output will be used
+    ///   - secondInput: (Optional) The name of the tensor that will provide the second operand.  If nil the previous node's output will be used
     ///   - propogateNaNs: (Optional) If true, NaN values will be propogated, otherwise they will not.  Default is false
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(firstInput: String? = nil, secondInput: String? = nil, propogateNaNs: Bool = false, name: String? = nil) {
@@ -297,7 +297,7 @@ public class Modulo : BinaryNode {
     ///
     /// - Parameters:
     ///   - firstInput: (Optional) The name of the tensor that will provide the first operand.  If nil the previous node's output will be used
-    ///   - secondInput: (Optional) The name of the tensor that will provide the second operand (the power to raise the first operand to).  If nil the previous node's output will be used
+    ///   - secondInput: (Optional) The name of the tensor that will provide the second operand (the divisor).  If nil the previous node's output will be used
     ///   - name: (Optional) The name for this node and its associated tensor
     override public init(firstInput: String? = nil, secondInput: String? = nil, name: String? = nil) {
         super.init(firstInput: firstInput, secondInput: secondInput, name: name)
@@ -322,7 +322,7 @@ public class HammingDistance : BinaryNode {
     ///
     /// - Parameters:
     ///   - firstInput: (Optional) The name of the tensor that will provide the first operand.  If nil the previous node's output will be used
-    ///   - secondInput: (Optional) The name of the tensor that will provide the second operand (the power to raise the first operand to).  If nil the previous node's output will be used
+    ///   - secondInput: (Optional) The name of the tensor that will provide the second operand.  If nil the previous node's output will be used
     ///   - resultType: (Optional) The data type for the result.  If nil, the data type from the first input tensor will be used.  Defaults to nil
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(firstInput: String? = nil, secondInput: String? = nil, resultType: DataType? = nil, name: String? = nil) {
@@ -344,6 +344,30 @@ public class HammingDistance : BinaryNode {
         
         //  Add to the graph itself
         let result = graph.mpsgraph.HammingDistance(primary: inputTensors.firstInputTensor, secondary: inputTensors.secondInputTensor, resultDataType: dataType, name: graph.getFullName(name))
+        
+        //  Return the created MPSGraphTensor
+        return [result]
+    }
+}
+
+///   Node to get the floor division remainder from two tensors
+public class FloorModulo : BinaryNode {
+    /// Constructor for an floor modulo operation
+    ///
+    /// - Parameters:
+    ///   - firstInput: (Optional) The name of the tensor that will provide the first operand.  If nil the previous node's output will be used
+    ///   - secondInput: (Optional) The name of the tensor that will provide the second operand (the divisor).  If nil the previous node's output will be used
+    ///   - name: (Optional) The name for this node and its associated tensor
+    override public init(firstInput: String? = nil, secondInput: String? = nil, name: String? = nil) {
+        super.init(firstInput: firstInput, secondInput: secondInput, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensors
+        let inputTensors = try graph.getBinaryTensors(firstInputName, secondInputName)
+        
+        //  Add to the graph itself
+        let result = graph.mpsgraph.floorModulo(inputTensors.firstInputTensor, inputTensors.secondInputTensor, name: graph.getFullName(name))
         
         //  Return the created MPSGraphTensor
         return [result]

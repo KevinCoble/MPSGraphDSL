@@ -18,7 +18,8 @@ public enum DataType: Sendable {
     //    case uInt16
     //    case int16
     //    case uInt32
-    //    case int32
+    ///  Int32
+    case int32
     //    case uInt64
     //    case int64
     //    case float16
@@ -33,6 +34,8 @@ public enum DataType: Sendable {
         switch (mpsDataType) {
         case .uInt8:
             self = .uInt8
+        case .int32:
+            self = .int32
         case .float32:
             self = .float32
         default:
@@ -56,6 +59,8 @@ public enum DataType: Sendable {
         switch (self) {
         case .uInt8:
             return (element is UInt8)
+        case .int32:
+            return (element is Int32)
         case .float32:
             return (element is Float32)
         case .double:
@@ -68,6 +73,8 @@ public enum DataType: Sendable {
         switch (self) {
         case .uInt8:
             return UInt8(0)
+        case .int32:
+            return Int32(0)
         case .float32:
             return Float32(0)
         case .double:
@@ -82,6 +89,10 @@ public enum DataType: Sendable {
             if (value < Int(UInt8.min)) { return UInt8.min }
             if (value > Int(UInt8.max)) { return UInt8.max }
             return UInt8(value)
+        case .int32:
+            if (value < Int32.min) { return Int32.min }
+            if (value > Int32.max) { return Int32.max }
+            return Int32(value)
         case .float32:
             return Float(value)
         case .double:
@@ -96,6 +107,10 @@ public enum DataType: Sendable {
             if (value < Double(UInt8.min)) { return UInt8.min }
             if (value > Double(UInt8.max)) { return UInt8.max }
             return UInt8(value)
+        case .int32:
+            if (value < Double(Int32.min)) { return Int32.min }
+            if (value > Double(Int32.max)) { return Int32.max }
+            return Int32(value)
         case .float32:
             return Float(value)
         case .double:
@@ -108,6 +123,8 @@ public enum DataType: Sendable {
         switch (self) {
         case .uInt8:
             return UInt8.defaultRange
+        case .int32:
+            return Int32.defaultRange
         case .float32:
             return Float.defaultRange
         case .double:
@@ -120,6 +137,8 @@ public enum DataType: Sendable {
         switch (self) {
         case .uInt8:
             return .uInt8
+        case .int32:
+            return .int32
         case .float32:
             return .float32
         default:
@@ -238,6 +257,91 @@ extension UInt8 : DataElement {
         let intRange = Int(range.min.asInteger)...Int(range.max.asInteger)
         let randomValue = Int.random(in: intRange)
         return UInt8(randomValue)
+    }
+}
+
+extension Int32 : DataElement {
+    ///  Class function to get the DataType of the DataElement
+    public static var dataType : DataType { get { return .uInt8 }}
+    ///  Instance function to get the DataType of the DataElement
+    public var dataType : DataType { get { return .uInt8 }}
+    
+    /// Get the default range of the data type
+    public static var defaultRange : ParameterRange {
+        get {
+            do {
+                return try ParameterRange(minimum: UInt8.min, maximum: UInt8.max)
+            }
+            catch { fatalError() } //  Should never be reached}
+        }
+    }
+    
+    ///  Get the data type as an integer
+    public var asInteger : Int {
+        get { return Int(self) }
+        set(newValue) {
+            if (newValue < Int(Int32.min)) { self = Int32.min }
+            if (newValue > Int(Int32.max)) { self = Int32.max }
+            self = Int32(newValue)
+        }
+    }
+    
+    ///  Get the data type as a Double floating point value
+    public var asDouble : Double {
+        get { return Double(self) }
+        set(newValue) {
+            if (newValue < Double(Int32.min)) { self = Int32.min }
+            if (newValue > Double(Int32.max)) { self = Int32.max }
+            self = Int32(newValue)
+        }
+    }
+    ///  Return the value of a Double as the type of this DataElement
+    public static func fromDouble(_ value: Double) -> DataElement {
+        var setValue: Int32
+        if (value < Double(Int32.min)) { setValue = Int32.min }
+        else if (value > Double(Int32.max)) { setValue = Int32.max }
+        else { setValue = Int32(value) }
+        return setValue
+        
+    }
+    
+    ///  Gets or sets the value as a Float32
+    public var asFloat32 : Float32 {
+        get { return Float32(self) }
+        set(newValue) {
+            if (newValue < Float32(Int32.min)) { self = Int32.min }
+            if (newValue > Float32(Int32.max)) { self = Int32.max }
+            self = Int32(newValue)
+        }
+    }
+    
+    /// Convert the DataElement value to an unsigned byte.  If a range is passed in, that range is used to scale the value into the 0-255 value.  Otherwise the default positive scale of the DataElement type is used
+    /// - Parameter range: The range of the DataElement to scale to teh UInt8 range
+    /// - Returns: The DataElement value converted to a UInt8 value
+    public func asUnsignedByte(range: ParameterRange?) -> UInt8 {
+        if let scale = range {
+            let minimum = scale.min.asDouble
+            let maximum = scale.max.asDouble
+            var fraction = (Double(self) - minimum) / (maximum - minimum)
+            if (fraction < 0.0) { fraction = 0.0 }
+            if (fraction > 1.0) { fraction = 1.0 }
+            fraction *= 255.0
+            return UInt8(fraction + 0.5)
+        }
+        else {
+            if (self < 0) { return UInt8.min }
+            if (self < UInt8.max) { return UInt8.max }
+            return UInt8(self)
+        }
+    }
+    
+    /// Get a random number of the DataElement type within a passed-in range
+    /// - Parameter range: the range for the random value
+    /// - Returns: a random value in the specified range
+    public static func getRandomNumberInRange(range: ParameterRange) -> DataElement {
+        let intRange = Int(range.min.asInteger)...Int(range.max.asInteger)
+        let randomValue = Int.random(in: intRange)
+        return Int32(randomValue)
     }
 }
 

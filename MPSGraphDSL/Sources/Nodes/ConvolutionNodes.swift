@@ -79,11 +79,9 @@ public class ConvolutionLayer: UnaryNode {
     var channelAsDepth: Bool = false
 
     var useBias: Bool = true
-    var weightInitialMinimum : Double = -0.5
-    var weightInitialMaximum : Double = 0.5
-    var biasInitialMinimum : Double = -0.5
-    var biasInitialMaximum : Double = 0.5
-    
+    var weightInitialization: WeightInitialization
+    var biasInitialValue: Double = 0.0
+
     var dilationRateH: Int = 1
     var dilationRateW: Int = 1
     var dilationRateD: Int = 1
@@ -118,6 +116,12 @@ public class ConvolutionLayer: UnaryNode {
         self.activationFunction = activationFunction
         self.strides = [heightStride, widthStride]
         self.numFilters = numFilters
+        switch (activationFunction) {
+            case .none, .tanh, .sigmoid:
+                weightInitialization = .XavierGlorotNormal
+            case .relu, .leakyRelu, .leakyReluFromTensor:
+                weightInitialization = .HeNormal
+        }
         super.init(input: input, name: name)
     }
 
@@ -139,6 +143,12 @@ public class ConvolutionLayer: UnaryNode {
         self.activationFunction = activationFunction
         self.strides = [depthStride, heightStride, widthStride]
         self.numFilters = numFilters
+        switch (activationFunction) {
+            case .none, .tanh, .sigmoid:
+                weightInitialization = .XavierGlorotNormal
+            case .relu, .leakyRelu, .leakyReluFromTensor:
+                weightInitialization = .HeNormal
+        }
         super.init(input: input, name: name)
     }
 
@@ -167,7 +177,8 @@ public class ConvolutionLayer: UnaryNode {
             throw GenericMPSGraphDSLErrors.UnknownShape
         }
         if (inputShape.dimensions.count < kernelSize.count) { throw MPSGraphNeuralNetErrors.KernelRankGreaterThanInput }
-        
+        let weightType = DataType(from: inputTensor.dataType)
+
         //  If using a bias term, add the bias variable
         var biasTensor: MPSGraphTensor? = nil
         let biasShape = TensorShape([numFilters])
@@ -182,14 +193,13 @@ public class ConvolutionLayer: UnaryNode {
                 biasTensor = graph.mpsgraph.constant(data, shape: biasShape.getMPSShape(), dataType: .float32)
             }
             else {
-                let biasRange = try ParameterRange(minimum: biasInitialMinimum, maximum: biasInitialMaximum)
-                let biases = TensorFloat32(shape: biasShape, randomValueRange: biasRange)
+                let biases = CreateTensor.constantValues(type: weightType, shape: biasShape, initialValue: biasInitialValue)
                 let biasData = biases.getData()
                 let biasName = graph.getFullName(name)! + "_biases"
                 biasTensor = graph.mpsgraph.variable(with: biasData, shape: biasShape.getMPSShape(), dataType: biases.type.getMPSDataType(), name: biasName)
                 
                 //  If we are adding load or reset assignments, put this variable on the list for load assignments
-                let node = Variable(dataType: .float32, shape: biasShape, randomValueRange: biasRange, name: biasName)
+                let node = Variable(dataType: weightType, shape: biasShape, initialValue: biasInitialValue, name: biasName)
                 if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
                     let loadResetAssignInfo = LoadResetAssignInfo(node: node, variableTensor: biasTensor!, sourceTensor: nil)
                     graph.loadResetAssignList.append(loadResetAssignInfo)
@@ -267,19 +277,20 @@ public class ConvolutionLayer: UnaryNode {
                 weightTensor = graph.mpsgraph.constant(data, shape: weightShape.getMPSShape(), dataType: .float32)
             }
             else {
-                let weightRange = try ParameterRange(minimum: weightInitialMinimum, maximum: weightInitialMaximum)
-                let weights = TensorFloat32(shape: weightShape, randomValueRange: weightRange)
+                let numInputs = kernelSize[0] * kernelSize[1] * numInputChannels
+                let numOutputs = 1  //  One output per convolution
+                let weights = try CreateTensor.createWeightInitializationTensor(type: weightType, shape: weightShape, initializationInfo: weightInitialization, numInputs: numInputs, numOutput: numOutputs)
                 let weightData = weights.getData()
                 let weightName = graph.getFullName(name)! + "_weights"
                 weightTensor = graph.mpsgraph.variable(with: weightData, shape: weightShape.getMPSShape(), dataType: weights.type.getMPSDataType(), name: weightName)
                 
                 //  If we are adding load or reset assignments, put this variable on the list for load assignments
-                let node = Variable(dataType: .float32, shape: weightShape, randomValueRange: weightRange, name: weightName)
+                let node = try Variable.createWeightInitializationVariable(type: weightType, shape: weightShape, initializationInfo: weightInitialization, numInputs: numInputs, numOutput: numOutputs, name: weightName)
                 if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
                     let loadResetAssignInfo = LoadResetAssignInfo(node: node, variableTensor: weightTensor, sourceTensor: nil)
                     graph.loadResetAssignList.append(loadResetAssignInfo)
                 }
-        
+                
                 //  If this is a learning layer - add the weights to the list to get assignment operations for
                 if let lossNode = lossNode {
                     graph.learningVariables.append((variable: node, tensor: weightTensor, loss: lossNode))
@@ -504,8 +515,9 @@ public class ConvolutionLayer: UnaryNode {
                 weightTensor = graph.mpsgraph.constant(data, shape: weightShape.getMPSShape(), dataType: .float32)
             }
             else {
-                let weightRange = try ParameterRange(minimum: weightInitialMinimum, maximum: weightInitialMaximum)
-                let weights = TensorFloat32(shape: weightShape, randomValueRange: weightRange)
+                let numInputs = kernelSize[0] * kernelSize[1] * kernelSize[2] * numInputChannels
+                let numOutputs = 1  //  One output per convolution
+                let weights = try CreateTensor.createWeightInitializationTensor(type: weightType, shape: weightShape, initializationInfo: weightInitialization, numInputs: numInputs, numOutput: numOutputs)
                 let weightData = weights.getData()
                 let weightName = graph.getFullName(name)! + "_weights"
                 weightTensor = graph.mpsgraph.variable(with: weightData, shape: weightShape.getMPSShape(), dataType: weights.type.getMPSDataType(), name: weightName)
@@ -513,7 +525,7 @@ public class ConvolutionLayer: UnaryNode {
                 addedTensors.append(weightTensor)
                 
                 //  If we are adding load or reset assignments, put this variable on the list for load assignments
-                let node = Variable(dataType: .float32, shape: weightShape, randomValueRange: weightRange, name: weightName)
+                let node = try Variable.createWeightInitializationVariable(type: weightType, shape: weightShape, initializationInfo: weightInitialization, numInputs: numInputs, numOutput: numOutputs, name: weightName)
                 if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
                     let loadResetAssignInfo = LoadResetAssignInfo(node: node, variableTensor: weightTensor, sourceTensor: nil)
                     graph.loadResetAssignList.append(loadResetAssignInfo)
@@ -727,20 +739,18 @@ public class ConvolutionLayer: UnaryNode {
         return self
     }
     
-    ///  Modifier to set the range for the random initialization of the weights
-    public func weightInitialRange(min: Double, max: Double) -> ConvolutionLayer {
-        weightInitialMinimum = min
-        weightInitialMaximum = max
+    ///  Modifier to set the initialization info for the random initialization of the weights
+    public func weightInitialization(initializerInfo: WeightInitialization) -> ConvolutionLayer {
+        weightInitialization = initializerInfo
         return self
     }
-    
-    ///  Modifier to set the range for the random initialization of the biases
-    public func biasInitialRange(min: Double, max: Double) -> ConvolutionLayer {
-        biasInitialMinimum = min
-        biasInitialMaximum = max
+
+    ///  Modifier to set the initialization value for the initialization of the biases
+    public func biasInitialValue(initialValue: Double) -> ConvolutionLayer {
+        self.biasInitialValue = initialValue
         return self
     }
-    
+
     ///  Modifier to set the padding for the height and width dimensions
     /// - Parameters:
     ///   - bottomPadding: The number of values to pad at the lower end of the height dimension

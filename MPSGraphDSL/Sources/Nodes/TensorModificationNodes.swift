@@ -2561,3 +2561,90 @@ public class SpaceToBatch : UnaryNode {
         }
     }
 }
+
+
+///   Node to gather the elements of the update tensor based on the indices provided
+public class Gather : BinaryNode {
+    let axis: Int
+    let axisTensor: String?
+    let useAxisTensor: Bool
+    let numBatchDimensions: Int?
+    let NDOperation: Bool
+    
+    /// Constructor for a gather operation along a fixed axis, with optional batch dimensions
+    ///
+    /// - Parameters:
+    ///   - updateTensor: (Optional) The name of the tensor that will provide the values to be gathered  If nil the previous node's output will be used
+    ///   - indicesTensor: (Optional) The name of the tensor that will provide the indices for the gather operation.  Must be an Int32 or Int64 tensor.  If nil the previous node's output will be used
+    ///   - axis: The axis along which the data is gathered.
+    ///   - numBatchDimensions: (Optional) The number of batch dimensions.  MPSGraph documentation for 'gather' for tensor shape requirements using batch dimensions includes.  Default is nil, meaning no batch dimensions are used in the gather operation
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(updateTensor: String? = nil, indicesTensor: String? = nil, axis: Int, numBatchDimensions: Int? = nil, name: String? = nil) {
+        self.axis = axis
+        self.axisTensor = nil
+        self.useAxisTensor = false
+        self.numBatchDimensions = numBatchDimensions
+        self.NDOperation = false
+        super.init(firstInput: updateTensor, secondInput: indicesTensor, name: name)
+    }
+    
+    /// Constructor for a gather operation along a fixed axis from a tensor
+    ///
+    /// - Parameters:
+    ///   - updateTensor: (Optional) The name of the tensor that will provide the values to be gathered  If nil the previous node's output will be used
+    ///   - indicesTensor: (Optional) The name of the tensor that will provide the indices for the gather operation.  Must be a scalar Int32 or Int64 tensor.  If nil the previous node's output will be used
+    ///   - axis: The axis along which the data is gathered.
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(updateTensor: String? = nil, indicesTensor: String? = nil, axisTensor: String? = nil, name: String? = nil) {
+        self.axis = 0
+        self.axisTensor = axisTensor
+        self.useAxisTensor = true
+        self.numBatchDimensions = nil
+        self.NDOperation = false
+        super.init(firstInput: updateTensor, secondInput: indicesTensor, name: name)
+    }
+    
+    /// Constructor for a gather operation along all non-batch axes
+    ///
+    /// - Parameters:
+    ///   - updateTensor: (Optional) The name of the tensor that will provide the values to be gathered  If nil the previous node's output will be used
+    ///   - indicesTensor: (Optional) The name of the tensor that will provide the indices for the gather operation.  Must be an Int32 or Int64 tensor.  If nil the previous node's output will be used
+    ///   - numBatchDimensions: The number of batch dimensions.  MPSGraph documentation for 'gatherND' for tensor shape requirements using batch dimensions includes.
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(updateTensor: String? = nil, indicesTensor: String? = nil, numBatchDimensions: Int, name: String? = nil) {
+        self.axis = 0
+        self.axisTensor = nil
+        self.useAxisTensor = false
+        self.numBatchDimensions = numBatchDimensions
+        self.NDOperation = true
+        super.init(firstInput: updateTensor, secondInput: indicesTensor, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensors
+        let inputTensors = try graph.getBinaryTensors(firstInputName, secondInputName)
+        
+        //  Add to the graph itself
+        let result: MPSGraphTensor
+        if (useAxisTensor) {
+            let axisMPSTensor = try graph.getOptionalTensor(axisTensor)
+            result = graph.mpsgraph.gatherAlongAxisTensor(axisMPSTensor, updates: inputTensors.firstInputTensor, indices: inputTensors.secondInputTensor, name: graph.getFullName(name))
+        }
+        else {
+            if let numBatchDimensions = numBatchDimensions {
+                if (NDOperation) {
+                    result = graph.mpsgraph.gatherND(withUpdatesTensor: inputTensors.firstInputTensor, indicesTensor: inputTensors.secondInputTensor, batchDimensions: numBatchDimensions, name: graph.getFullName(name))
+               }
+                else {
+                    result = graph.mpsgraph.gather(withUpdatesTensor: inputTensors.firstInputTensor, indicesTensor: inputTensors.secondInputTensor, axis: axis, batchDimensions: numBatchDimensions, name: graph.getFullName(name))
+                }
+            }
+            else {
+                result = graph.mpsgraph.gatherAlongAxis(axis, updates: inputTensors.firstInputTensor, indices: inputTensors.secondInputTensor, name: graph.getFullName(name))
+            }
+        }
+        
+        //  Return the created MPSGraphTensor
+        return [result]
+    }
+}

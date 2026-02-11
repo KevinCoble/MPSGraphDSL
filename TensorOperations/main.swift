@@ -33,10 +33,11 @@ let broadcast = false
 let flatten = false
 let onehot = false
 let dropout = false
-let quantize = true
+let quantize = false
 let pool = false
 let shapeOf = false
 let depthToSpace = false
+let gather = true
 
 if matrixMultiplication {
     let MMvectorTensor = try TensorFloat32(shape: TensorShape([2]), initialValues: [7.0, 8.0])
@@ -324,8 +325,7 @@ if (findNonZeroes) {
     
     let findZeroesGraph = Graph {
         Constant(values: someZeroesTensor, name: "someZeroesTensor")
-        NonZeroIndices()            //  Produces Int32 tensor, so it needs to be cast
-        Cast(newType: .float32, name: "result")
+        NonZeroIndices(name: "result")
             .targetForModes(["findNonZeroesTest"])
     }
     
@@ -568,8 +568,7 @@ if (argSort) {
     
     let argSortGraph = Graph {
         Constant(values: initialTensor, name: "startTensor")
-        ArgSort("startTensor", axis: 1)
-        Cast(newType: .float32, name: "result")
+        ArgSort("startTensor", axis: 1, name: "result")
             .targetForModes(["argSortTest"])
     }
 
@@ -781,8 +780,7 @@ if (shapeOf) {
     
     let shapeOfGraph = Graph {
         Constant(values: initialTensor, name: "startTensor")
-        ShapeOfTensor()
-        Cast(newType: .float32, name: "result")
+        ShapeOfTensor(name: "result")
             .targetForModes(["shapeOfTest"])
     }
 
@@ -819,4 +817,36 @@ if (depthToSpace) {
     results = try spaceToDepthGraph.runOne(mode: "depthToSpaceTest", inputTensors: [:])
     result = results["result"]!
     try result.print3D(elementWidth: 6, precision: 1)
+}
+
+if (gather) {
+    let updateTensor = try TensorFloat32(shape: TensorShape([5, 5]), initialValues: [7.0, 2.0, 1.0, 9.0, 5.0, 6.0, 3.0, 8.0, 1.2, -2.0, 9.0, 17.0, 6.3, 5.8, 14.0, 2.3, 16.0,  7.2,  10.3, 6.7, 8.2, 11.1, 5.9, 3.3, 2.4])
+    //                                                                              [7.0,  2.0,  1.0,  9.0,  5.0
+    //                                                                               6.0,  3.0,  8.0,  1.2, -2.0
+    //                                                                               9.0, 17.0,  6.3,  5.8, 14.0
+    //                                                                               2.3, 16.0,  7.2,  10.3, 6.7
+    //                                                                               8.2, 11.1,  5.9,   3.3, 2.4]
+    print("")
+    print("Update tensor")
+    try updateTensor.print2D(elementWidth: 6, precision: 1)
+    
+    let indicesTensor = try TensorInt32(shape: TensorShape([2, 5]), initialValues: [0, 1, 2, 3, 4, 3, 2, 1, 0, 4])
+    //                                                                              [0,  1,  2,  3,  4
+    //                                                                               3,  2,  1,  0,  4]
+    print("")
+    print("Indices tensor")
+    try indicesTensor.print2D(elementWidth: 6, precision: 0)
+    
+    let gatherGraph = Graph {
+        Constant(values: updateTensor, name: "updateTensor")
+        Constant(values: indicesTensor, name: "indicesTensor")
+        Gather(updateTensor: "updateTensor", indicesTensor: "indicesTensor", axis: 0, name: "result")
+            .targetForModes(["gatherTest"])
+    }
+    
+    print("")
+    print("Gather operation along axis 0 (rows)")
+    let results = try gatherGraph.runOne(mode: "gatherTest", inputTensors: [:])
+    let result = results["result"]!
+    try result.print2D(elementWidth: 6, precision: 1)
 }

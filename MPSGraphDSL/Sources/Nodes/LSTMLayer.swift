@@ -187,12 +187,11 @@ public class LSTMLayer: UnaryNode {
     var forgetGateActivation: MPSGraphRNNActivation = .sigmoid
     var inputGateActivation: MPSGraphRNNActivation = .sigmoid
     var outputGateActivation: MPSGraphRNNActivation = .sigmoid
-    var recurrentWeightInitialMinimum : Double = -0.5
-    var recurrentWeightInitialMaximum : Double = 0.5
-    var inputWeightInitialMinimum : Double = -0.5
-    var inputWeightInitialMaximum : Double = 0.5
-    var biasInitialMinimum : Double = -0.5
-    var biasInitialMaximum : Double = 0.5
+    var recurrentWeightInitialization: WeightInitialization
+    var recurrentWeightOrthogonalization: Bool = true
+    var inputWeightInitialization: WeightInitialization
+    var biasInitialValue: Double = 0.0
+    var bidirectional: Bool = false
     var produceCellOutput: Bool = false
     var createLastState: Bool = true
     var createLastCell: Bool = false
@@ -213,6 +212,14 @@ public class LSTMLayer: UnaryNode {
     ///   - name: (Optional) The name for this node and its associated tensors.  One to three tensors will be produced
     public init(input: String? = nil, stateSize: Int, name: String? = nil) {
         self.stateSize = stateSize
+        switch (activation) {
+            case .relu:
+            recurrentWeightInitialization = .HeNormal
+            inputWeightInitialization = .HeNormal
+        default:
+            recurrentWeightInitialization = .XavierGlorotNormal
+            inputWeightInitialization = .XavierGlorotNormal
+        }
         super.init(input: input, name: name)
     }
     
@@ -224,9 +231,9 @@ public class LSTMLayer: UnaryNode {
         
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
-        
+        let weightType = DataType(from: inputTensor.dataType)
+
         //  Get the shape of the input tensor and determine number of features and number of inputs
-        //lstm        let numFeatures: Int
         let numInputs: Int
         if let inputShape = inputTensor.shape {
             if (inputShape.count != 3) { throw MPSGraphNeuralNetErrors.InputTensorNot3D }
@@ -238,9 +245,24 @@ public class LSTMLayer: UnaryNode {
         }
         
         //  Add the recurrent weights variable
-        let rweightsShape = TensorShape([4*stateSize, stateSize])       //  [4H, H]
-        let rweightsRange = try ParameterRange(minimum: recurrentWeightInitialMinimum, maximum: recurrentWeightInitialMaximum)
-        let rweights = TensorFloat32(shape: rweightsShape, randomValueRange: rweightsRange)
+        let rweightsShape : TensorShape
+        if (bidirectional) {
+            rweightsShape = TensorShape([2, 4*stateSize, stateSize])       //  [2, 4H, H] for bidirectional
+        }
+        else {
+            rweightsShape = TensorShape([4*stateSize, stateSize])       //  [4H, H]
+        }
+        var rweights: Tensor
+        if (recurrentWeightOrthogonalization) {
+            let squareWeightsShape = TensorShape([stateSize, stateSize])
+            rweights = try CreateTensor.createOrthogonalWeightInitializationTensor(type: weightType, shape: squareWeightsShape, initializationInfo: recurrentWeightInitialization, numGates: bidirectional ? 8 : 4)
+            if (bidirectional) {
+                rweights = try CreateTensor.createReshapedTensor(from: rweights, newShape: rweightsShape)
+            }
+        }
+        else {
+            rweights = try CreateTensor.createWeightInitializationTensor(type: weightType, shape: rweightsShape, initializationInfo: recurrentWeightInitialization, numInputs: stateSize, numOutput: stateSize)
+        }
         let rweightData = rweights.getData()
         let rweightName = graph.getFullName(name)! + "_recurrentWeights"
         let rweightTensor = graph.mpsgraph.variable(with: rweightData, shape: rweightsShape.getMPSShape(), dataType: rweights.type.getMPSDataType(), name: rweightName)
@@ -248,7 +270,7 @@ public class LSTMLayer: UnaryNode {
         addedTensors.append(rweightTensor)
         
         //  If we are adding load or reset assignments, put this variable on the list for load assignments
-        var node = Variable(dataType: .float32, shape: rweightsShape, randomValueRange: rweightsRange, name: rweightName)
+        var node = try Variable.createWeightInitializationVariable(type: weightType, shape: rweightsShape, initializationInfo: recurrentWeightInitialization, numInputs: stateSize, numOutput: stateSize, orthogonal: recurrentWeightOrthogonalization, name: rweightName)
         if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
             let loadResetAssignInfo = LoadResetAssignInfo(node: node, variableTensor: rweightTensor, sourceTensor: nil)
             graph.loadResetAssignList.append(loadResetAssignInfo)
@@ -260,9 +282,8 @@ public class LSTMLayer: UnaryNode {
         }
         
         //  Add the input weights variable
-        let iweightsShape = TensorShape([4*stateSize, numInputs])       //  [4H, I]
-        let iweightsRange = try ParameterRange(minimum: recurrentWeightInitialMinimum, maximum: recurrentWeightInitialMaximum)
-        let iweights = TensorFloat32(shape: iweightsShape, randomValueRange: iweightsRange)
+        let iweightsShape = TensorShape([(bidirectional ? 8 : 4) * stateSize, numInputs])       //  [4H, I], [8H, I] for bidirectional
+        let iweights = try CreateTensor.createWeightInitializationTensor(type: weightType, shape: iweightsShape, initializationInfo: inputWeightInitialization, numInputs: numInputs, numOutput: stateSize)
         let iweightData = iweights.getData()
         let iweightName = graph.getFullName(name)! + "_inputWeights"
         let iweightTensor = graph.mpsgraph.variable(with: iweightData, shape: iweightsShape.getMPSShape(), dataType: iweights.type.getMPSDataType(), name: iweightName)
@@ -270,7 +291,7 @@ public class LSTMLayer: UnaryNode {
         addedTensors.append(iweightTensor)
         
         //  If we are adding load or reset assignments, put this variable on the list for load assignments
-        node = Variable(dataType: .float32, shape: iweightsShape, randomValueRange: iweightsRange, name: iweightName)
+        node = try Variable.createWeightInitializationVariable(type: weightType, shape: iweightsShape, initializationInfo: inputWeightInitialization, numInputs: numInputs, numOutput: stateSize, name: iweightName)
         if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
             let loadResetAssignInfo = LoadResetAssignInfo(node: node, variableTensor: iweightTensor, sourceTensor: nil)
             graph.loadResetAssignList.append(loadResetAssignInfo)
@@ -282,17 +303,16 @@ public class LSTMLayer: UnaryNode {
         }
         
         //  Add the bias variable
-        let biasShape = TensorShape([4*stateSize])       //  [4H]
-        let biasRange = try ParameterRange(minimum: recurrentWeightInitialMinimum, maximum: recurrentWeightInitialMaximum)
-        let bias = TensorFloat32(shape: biasShape, randomValueRange: biasRange)
-        let biasData = bias.getData()
+        let biasShape = TensorShape([(bidirectional ? 8 : 4) * stateSize])       //  [4H] or [8H] for bidirectional
+        let biases = CreateTensor.constantValues(type: weightType, shape: biasShape, initialValue: biasInitialValue)
+        let biasData = biases.getData()
         let biasName = graph.getFullName(name)! + "_bias"
-        let biasTensor = graph.mpsgraph.variable(with: biasData, shape: biasShape.getMPSShape(), dataType: bias.type.getMPSDataType(), name: biasName)
+        let biasTensor = graph.mpsgraph.variable(with: biasData, shape: biasShape.getMPSShape(), dataType: weightType.getMPSDataType(), name: biasName)
         suffixes.append("_bias")
         addedTensors.append(biasTensor)
         
         //  If we are adding load or reset assignments, put this variable on the list for load assignments
-        node = Variable(dataType: .float32, shape: biasShape, randomValueRange: biasRange, name: biasName)
+        node = Variable(dataType: weightType, shape: biasShape, initialValue: biasInitialValue, name: biasName)
         if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
             let loadResetAssignInfo = LoadResetAssignInfo(node: node, variableTensor: biasTensor, sourceTensor: nil)
             graph.loadResetAssignList.append(loadResetAssignInfo)
@@ -306,7 +326,7 @@ public class LSTMLayer: UnaryNode {
         //  Create the descriptor
         let descriptor = MPSGraphLSTMDescriptor()
         descriptor.activation = activation
-        descriptor.bidirectional = false
+        descriptor.bidirectional = bidirectional
         descriptor.cellGateActivation = cellGateActivation
         descriptor.forgetGateActivation = forgetGateActivation
         descriptor.forgetGateLast = false
@@ -421,27 +441,31 @@ public class LSTMLayer: UnaryNode {
         return self
     }
     
-    ///  Modifier to set the range for the random initializer of the recurrent weights.  Default is -0.5 to 0.5
-    public func recurrentWeightInitialRange(min: Double, max: Double) -> LSTMLayer {
-        recurrentWeightInitialMinimum = min
-        recurrentWeightInitialMaximum = max
+    ///  Modifier to set the initializer parameters for the recurrent weights
+    public func recurrentWeightInitialization(initializerInfo: WeightInitialization, orthogonalize: Bool = true) -> LSTMLayer {
+        recurrentWeightInitialization = initializerInfo
+        self.recurrentWeightOrthogonalization = orthogonalize
+        return self
+    }
+
+    ///  Modifier to set the initializer parameters for the input weights
+    public func inputWeightInitialization(initializerInfo: WeightInitialization) -> LSTMLayer {
+        inputWeightInitialization = initializerInfo
         return self
     }
     
-    ///  Modifier to set the range for the random initializer of the input weights.  Default is -0.5 to 0.5
-    public func inputWeightInitialRange(min: Double, max: Double) -> LSTMLayer {
-        inputWeightInitialMinimum = min
-        inputWeightInitialMaximum = max
+    ///  Modifier to set the initialization value for the initialization of the biases
+    public func biasInitialValue(initialValue: Double) -> LSTMLayer {
+        self.biasInitialValue = initialValue
         return self
     }
     
-    ///  Modifier to set the range for the random initializer of the bias.  Default is -0.5 to 0.5
-    public func biasInitialRange(min: Double, max: Double) -> LSTMLayer {
-        biasInitialMinimum = min
-        biasInitialMaximum = max
+    ///  Modifier to make the recurrent layer bidirectional
+    public func makeBidirectional() -> LSTMLayer {
+        self.bidirectional = true
         return self
     }
-    
+
     ///  Modifier to set the node output options
     /// - Parameters:
     ///   - produceCellOutput: (Optional) if true the cell state time loop output tensor with suffix "_cell" is produced..  Defaults to false

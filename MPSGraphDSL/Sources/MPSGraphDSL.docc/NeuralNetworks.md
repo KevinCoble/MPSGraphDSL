@@ -11,7 +11,7 @@ The following composite nodes are available:
 | ``FullyConnectedLayer``  | A standard fully-connected layer with optional bias term and activation function                             |
 | ``RNNLayer``             | A standard one-gate recursivve neural newtwork layer.  Weights, biases and activation functions are managed  |
 | ``LSTMLayer``            | The long short term memory layer, with all four gates.  Weights, biases and activation functions are managed |
-| ``GRULayer`` (alpha!)    | The gated recurssive unit layer, with all three gates.  Weights, biases and activation functions are managed |
+| ``GRULayer`` (alpha!)    | The gated recursive unit layer, with all three gates.  Weights, biases and activation functions are managed |
 | ``PoolingLayer``         | A pooling layer, with three possible pooling functions.  Tensor ranks are managed (MPSGraph requires 4D inputs)|
 | ``ConvolutionLayer``     | A convolution layer, with two-dimensional or three-dimensional kernels.  Tensor ranks are managed (MPSGraph requires 4D or 5D inputs)|
 
@@ -35,6 +35,10 @@ The actual and predicted inputs are names of tensors (or if nil it assumes the p
 
 The fully-connected layer is a standard neural network layer that takes the input tensor, multiplies it by the weight tensor, optionally adds a bias term to that result, then performs an activation function on the final output.  If needed, tensor reshape operations may be added to coerce tensors to the correct shape.
 
+The weights for the layer can be initialized in a number of different ways, using uniform random values with a given range, gaussian normal values with given mean a standard deviation, or Xavier/Glorot or He parameters can be used with either of these methods.  The default method is based on the activation function being used.  If a ReLU or related activation function the initialization is done with a normal distribution using the He method parameters.  Any other activation function changes the default initialization method to a normal distribution using the Xavier/Glorot method parameters.  The initialization method and parameters used can set using a modifier on the layer.
+
+Bias initial values, if a bias is to be used, can be initialized to a given value.  The value defaults to zero, but can be set using a modifier.
+
 ####  Creating a FullyConnectedLayer
 
 The following initializer is used in a Graph (or SubGraph) definition to add a FullyConnectedLayer:
@@ -47,7 +51,7 @@ The output shape determines the number of 'neurons' in the layer.  Rather than a
 
 The activation function is selected from the enumeration ``ActivationFunction``.  To turn off activation, select the option '.none'.
 
-The input tensor and node name are standard parameters.  See the article on Creating Graphs for more information
+The input tensor and node name are standard parameters.  See the article on Creating Graphs for more information.
 
 
 ####  Modifiers for a FullyConnectedLayer
@@ -57,8 +61,8 @@ The following modifiers are available for the FullyConnectedLayer node:
 | Modifier            | Description |
 | ----------------------------------| ----------- |
 |  noBiasTerm()                     |  If added removes the bias Variable and the addition of it to the matrix multiplication  |
-|  weightInitialRange(min:, max:)   |  Sets the range for random initialization of the weights Variable                        |
-|  biasInitialRange(min:, max:)     |  Sets the range for random initialization of the bias Variable                           |
+|  weightInitialization(initializerInfo:)   |  Sets the method and parameters for random initialization of the weights Variable       |
+|  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
 |  learnWithRespectTo(_ lossNode)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the FullyConnectedLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
@@ -84,7 +88,9 @@ These tensors can be referenced using the name of the node with the suffix added
 
 ### RNNLayer
 
-The recursive neural network layer is a neural network layer that feeds the previous output back into itself as another input.  This allows a sequence in the input data to be learned.  Since the previous output is directly connected to the input, sequences that are long will have a hard time being learned due to the "exploding or vanishing gradient" problem.  LSTM and Gru layers have methods to address this.
+The recursive neural network layer is a neural network layer that feeds the previous output back into itself as another input.  This allows a sequence in the input data to be learned.  Since the previous output is directly connected to the input, sequences that are long will have a hard time being learned due to the "exploding or vanishing gradient" problem.  LSTM and GRU layers have methods to address this.  Orthogonal matrices for the recurrent weights can also help, and are on by default for the RNNLayer.
+
+The RNNLayer accepts time-ordered data as the input sequence.  An option on the layer turns it into two nodes where one takes the sequence in forward order, and the other in reverse order.  This doubles the number of parameters created by the layer.  The two nodes are combined using a sum operation to create the final output of the layer.  Use the 'makeBidirectional' modifier to turn this option on.
 
 ####  Creating an RNNLayer
 
@@ -99,6 +105,14 @@ The RNN layer has four parameters that define the size of data being handled.  T
 The state size is explicitly given by the second parameter.  It will be used for weight, bias, and output sizes
 
 The input shape gives the other three configuration values.  The input tensor must be of rank 3, of the shape \[T, N, I\].  It is applied in a 'for' loop to the RNN node across the time (T) variable.  Therefore if your input tensor shape is \[4, N, I\], four \[N, I\] tensors are sequentially sent into the RNN MPSGraph node, with the state values calculated and concatenated into the output tensor.
+
+#### Weight Initialization of an RNNLayer
+
+Both the recurrent and input weights for the layer can be initialized in a number of different ways, using uniform random values with a given range, gaussian normal values with given mean a standard deviation, or Xavier/Glorot or He parameters can be used with either of these methods.  The default method is based on the activation function being used.  If a ReLU or related activation function the initialization for both weight sets is done with a normal distribution using the He method parameters.  Any other activation function changes the default initialization method to a normal distribution using the Xavier/Glorot method parameters.  The initialization method and parameters used can set using a modifier on the layer.
+
+Since the recurrent weights are used repeatedly on the state value, it is especially susceptable to vanishing or exploding gradients.  One way to help avoid this is to have the recurrent weights be an orthonormal matrix.  This option is on by default, but can be set with a modifier.  The recurrent weight matrix is initialized like any other weight matrix, and then a Gram-Schmidt method is used to turn the random matrix to an orthonormal one if the option is on.
+
+Bias initial values, if a bias is to be used, can be initialized to a given value.  The value defaults to zero, but can be set using a modifier.
 
 #### Outputs of an RNNLayer
 
@@ -124,9 +138,10 @@ The following modifiers are available for the RNNLayer node:
 | Modifier            | Description |
 | --------------------------------------------| ----------- |
 |  activationFunction(_ activation)           |  Sets the activation function for the layer.  Default is tanh |
-|  recurrentWeightInitialRange(min, max)      |  Sets the random value range for initializing the recurrent weights.  Default is -0.5 to 0.5   |
-|  inputWeightInitialRange(min, max)          |  Sets the random value range for initializing the input weights.  Default is -0.5 to 0.5   |
-|  biasInitialRange(min, max)                 |  Sets the random value range for initializing the bias values.  Default is -0.5 to 0.5   |
+|  recurrentWeightInitialization(initializerInfo:, orthogonalize:)   |  Sets the method and parameters for random initialization of the recurrent weights Variable       |
+|  inputWeightInitialization(initializerInfo:)   |  Sets the method and parameters for random initialization of the input weights Variable       |
+|  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
+|  makeBidirectional()     |  Makes the layer bidirectional                          |
 |  setOutput(createLastState, targetLoops, targetLasts)  |  Sets the output flags.  See above discussion   |
 |  learnWithRespectTo(_ lossNode)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
 
@@ -146,11 +161,13 @@ The following tensors are added to the Graph by the node:
 | "_lastStateSlice"     |     No     | If createLastState is true.  The result of the slice operation to extract last state from rolled state tensor.  Shape \[1, N, H\]|
 | "_lastState"          |   Can be   | If createLastState is true.  The final state output.  Shape \[N, H\]     |
 
-These tensors can be referenced using the name of the node with the suffix added.
+These tensors can be referenced using the name of the node with the suffix added.  Shapes of the weights and bias nodes will be doubled in the first dimension when the node is set to be bidirectional.
 
 ### LSTMLayer
 
 The LSTM layer implements the Long Short Term Memory layer.  Apple provides an LSTM tensor, but it requires you to handle all weights and bias variables, requires all configuration options to be set, and only outputs the fully rolled state and cell tensors.  This node takes care of all the variables, offers default configuration, and will extract the last state from the output tensor (which is usually the output wanted).
+
+The LSTMLayer accepts time-ordered data as the input sequence.  An option on the layer turns it into two nodes where one takes the sequence in forward order, and the other in reverse order.  This doubles the number of parameters created by the layer.  The two nodes are combined using a sum operation to create the final output of the layer.  Use the 'makeBidirectional' modifier to turn this option on.
 
 ####  Creating an LSTMLayer
 
@@ -167,6 +184,14 @@ The LSTM layer has four parameters that define the size of data being handled.  
 The state size is explicitly given by the second parameter.  It will be used for weight, bias, and output sizes
 
 The input shape gives the other three configuration values.  The input tensor must be of rank 3, of the shape \[T, N, I\].  It is applied in a 'for' loop to the LSTM node across the time (T) variable.  Therefore if your input tensor shape is \[4, N, I\], four \[N, I\] tensors are sequentially sent into the LSTM MPSGraph node, with the state and cell values calculated and concatenated into the output tensors.
+
+#### Weight Initialization of an LSTMLayer
+
+Both the recurrent and input weights for the layer can be initialized in a number of different ways, using uniform random values with a given range, gaussian normal values with given mean a standard deviation, or Xavier/Glorot or He parameters can be used with either of these methods.  The default method is based on the activation function being used.  If a ReLU or related activation function the initialization for both weight sets is done with a normal distribution using the He method parameters.  Any other activation function changes the default initialization method to a normal distribution using the Xavier/Glorot method parameters.  The initialization method and parameters used can set using a modifier on the layer.
+
+Since the recurrent weights are used repeatedly on the state value, it is especially susceptable to vanishing or exploding gradients.  One way to help avoid this is to have the recurrent weights be an orthonormal matrix.  This option is on by default, but can be set with a modifier.  The recurrent weight matrix is initialized like any other weight matrix, and then a Gram-Schmidt method is used to turn the random matrix to an orthonormal one if the option is on.
+
+Bias initial values, if a bias is to be used, can be initialized to a given value.  The value defaults to zero, but can be set using a modifier.
 
 #### Outputs of an LSTMLayer
 
@@ -201,9 +226,10 @@ The following modifiers are available for the LSTMLayer node:
 |  inputGateActivationFunction(_ activation)  |  Sets the input gate activation function.  Default is sigmoid   |
 |  outputGateActivationFunction(_ activation) |  Sets the output gate activation function.  Default is sigmoid   |
 |  allActivationFunctions(_ activation)       |  Sets all five of the activation functions the same   |
-|  recurrentWeightInitialRange(min, max)      |  Sets the random value range for initializing the recurrent weights.  Default is -0.5 to 0.5   |
-|  inputWeightInitialRange(min, max)          |  Sets the random value range for initializing the input weights.  Default is -0.5 to 0.5   |
-|  biasInitialRange(min, max)                 |  Sets the random value range for initializing the bias values.  Default is -0.5 to 0.5   |
+|  recurrentWeightInitialization(initializerInfo:, orthogonalize:)   |  Sets the method and parameters for random initialization of the recurrent weights Variable       |
+|  inputWeightInitialization(initializerInfo:)   |  Sets the method and parameters for random initialization of the input weights Variable       |
+|  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
+|  makeBidirectional()     |  Makes the layer bidirectional                          |
 |  setOutput(produceCellOutput, createLastState, createLastCell, targetLoops, targetLasts)  |  Sets the output flags.  See above discussion   |
 |  learnWithRespectTo(_ lossNode)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
 
@@ -226,7 +252,7 @@ The following tensors are added to the Graph by the node:
 | "_lastCellSlice"      |     No     | If createLastCell is true.  The result of the slice operation to extract last cell from rolled cell tensor.  Shape \[1, N, H\]|
 | "_lastCell"           |   Can be   | If createLastCell is true.  The final cell output.  Shape \[N, H\]     |
 
-These tensors can be referenced using the name of the node with the suffix added.
+These tensors can be referenced using the name of the node with the suffix added.  Shapes of the weights and bias nodes will be doubled in the first dimension when the node is set to be bidirectional.
 
 ### GRULayer
 
@@ -247,6 +273,14 @@ The GRU layer has four parameters that define the size of data being handled.  T
 The state size is explicitly given by the second parameter.  It will be used for weight, bias, and output sizes
 
 The input shape gives the other three configuration values.  The input tensor must be of rank 3, of the shape \[T, N, I\].  It is applied in a 'for' loop to the GRU node across the time (T) variable.  Therefore if your input tensor shape is \[4, N, I\], four \[N, I\] tensors are sequentially sent into the GRU MPSGraph node, with the state and cell values calculated and concatenated into the output tensors.
+
+#### Weight Initialization of an GRULayer
+
+Both the recurrent and input weights for the layer can be initialized in a number of different ways, using uniform random values with a given range, gaussian normal values with given mean a standard deviation, or Xavier/Glorot or He parameters can be used with either of these methods.  The default method is based on the activation function being used.  If a ReLU or related activation function the initialization for both weight sets is done with a normal distribution using the He method parameters.  Any other activation function changes the default initialization method to a normal distribution using the Xavier/Glorot method parameters.  The initialization method and parameters used can set using a modifier on the layer.
+
+Since the recurrent weights are used repeatedly on the state value, it is especially susceptable to vanishing or exploding gradients.  One way to help avoid this is to have the recurrent weights be an orthonormal matrix.  This option is on by default, but can be set with a modifier.  The recurrent weight matrix is initialized like any other weight matrix, and then a Gram-Schmidt method is used to turn the random matrix to an orthonormal one if the option is on.
+
+Bias initial values, if a bias is to be used, can be initialized to a given value.  The value defaults to zero, but can be set using a modifier.
 
 #### Outputs of an GRULayer
 
@@ -274,9 +308,10 @@ The following modifiers are available for the GRULayer node:
 |  outputGateActivation(_ activation)         |  Sets the output gate activation function.  Default is tanh   |
 |  resetGateActivation(_ activation)          |  Sets the reset gate activation function.  Default is sigmoid  |
 |  updateGateActivation(_ activation)         |  Sets the update gate activation function.  Default is sigmoid   |
-|  recurrentWeightInitialRange(min, max)      |  Sets the random value range for initializing the recurrent weights.  Default is -0.5 to 0.5   |
-|  inputWeightInitialRange(min, max)          |  Sets the random value range for initializing the input weights.  Default is -0.5 to 0.5   |
-|  biasInitialRange(min, max)                 |  Sets the random value range for initializing the bias values.  Default is -0.5 to 0.5   |
+|  recurrentWeightInitialization(initializerInfo:, orthogonalize:)   |  Sets the method and parameters for random initialization of the recurrent weights Variable       |
+|  inputWeightInitialization(initializerInfo:)   |  Sets the method and parameters for random initialization of the input weights Variable       |
+|  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
+|  makeBidirectional()     |  Makes the layer bidirectional                          |
 |  setOutput(createLastState, targetLoops, targetLasts)  |  Sets the output flags.  See above discussion   |
 |  learnWithRespectTo(_ lossNode)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
 
@@ -296,7 +331,7 @@ The following tensors are added to the Graph by the node:
 | "_lastStateSlice"     |     No     | If createLastState is true.  The result of the slice operation to extract last state from rolled state tensor.  Shape \[1, N, H\]|
 | "_lastState"          |   Can be   | If createLastState is true.  The final state output.  Shape \[N, H\]     |
 
-These tensors can be referenced using the name of the node with the suffix added.
+These tensors can be referenced using the name of the node with the suffix added.  Shapes of the weights and bias nodes will be doubled in the first dimension when the node is set to be bidirectional.
 
 ### PoolingLayer
 

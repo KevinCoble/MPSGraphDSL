@@ -146,6 +146,10 @@ public enum MPSGraphNeuralNetErrors : Error {
     case NoConfiguredTargetTensorsForTargettedNode
     ///  A convolution with a kernel rank of 2 was attempted on a tensor with a dimension marked as a channel dimension.
     case ConvolutionOnTensorsWithChannelsMustBe3D
+    ///  Input tensors for othogonalization must be at a 2 dimensional square matrix
+    case InputTensorNotSquare2D
+    ///  Recurrent weights that are configured for orthogonal initialization must be for floating types - check input type to the layer
+    case OrthogonalizationOnNonFloatingTensor
 }
 
 ///  Errors that can be thrown by the MPSGraph run system

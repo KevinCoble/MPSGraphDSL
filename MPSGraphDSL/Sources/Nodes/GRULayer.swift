@@ -166,12 +166,11 @@ public class GRULayer: UnaryNode {
     var outputGateActivation: MPSGraphRNNActivation = .tanh
     var resetGateActivation: MPSGraphRNNActivation = .sigmoid
     var updateGateActivation: MPSGraphRNNActivation = .sigmoid
-    var recurrentWeightInitialMinimum : Double = -0.5
-    var recurrentWeightInitialMaximum : Double = 0.5
-    var inputWeightInitialMinimum : Double = -0.5
-    var inputWeightInitialMaximum : Double = 0.5
-    var biasInitialMinimum : Double = -0.5
-    var biasInitialMaximum : Double = 0.5
+    var recurrentWeightInitialization: WeightInitialization
+    var recurrentWeightOrthogonalization: Bool = true
+    var inputWeightInitialization: WeightInitialization
+    var biasInitialValue: Double = 0.0
+    var bidirectional: Bool = false
     var createLastState: Bool = true
     var targetLoop: Bool = false
     var targetLast: Bool = true
@@ -190,6 +189,14 @@ public class GRULayer: UnaryNode {
     ///   - name: (Optional) The name for this node and its associated tensors.  One to three tensors will be produced
     public init(input: String? = nil, stateSize: Int, name: String? = nil) {
         self.stateSize = stateSize
+        switch (outputGateActivation) {
+            case .relu:
+            recurrentWeightInitialization = .HeNormal
+            inputWeightInitialization = .HeNormal
+        default:
+            recurrentWeightInitialization = .XavierGlorotNormal
+            inputWeightInitialization = .XavierGlorotNormal
+        }
         super.init(input: input, name: name)
     }
     
@@ -201,9 +208,9 @@ public class GRULayer: UnaryNode {
         
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
-        
+        let weightType = DataType(from: inputTensor.dataType)
+
         //  Get the shape of the input tensor and determine number of features and number of inputs
-        //lstm        let numFeatures: Int
         let numInputs: Int
         if let inputShape = inputTensor.shape {
             if (inputShape.count != 3) { throw MPSGraphNeuralNetErrors.InputTensorNot3D }
@@ -215,9 +222,24 @@ public class GRULayer: UnaryNode {
         }
         
         //  Add the recurrent weights variable
-        let rweightsShape = TensorShape([3*stateSize, stateSize])       //  [3H, H]
-        let rweightsRange = try ParameterRange(minimum: recurrentWeightInitialMinimum, maximum: recurrentWeightInitialMaximum)
-        let rweights = TensorFloat32(shape: rweightsShape, randomValueRange: rweightsRange)
+        let rweightsShape : TensorShape
+        if (bidirectional) {
+            rweightsShape = TensorShape([2, stateSize, stateSize])       //  [2, 3H, H] for bidirectional
+        }
+        else {
+            rweightsShape = TensorShape([stateSize, stateSize])       //  [3H, H]
+        }
+        var rweights: Tensor
+        if (recurrentWeightOrthogonalization) {
+            let squareWeightsShape = TensorShape([stateSize, stateSize])
+            rweights = try CreateTensor.createOrthogonalWeightInitializationTensor(type: weightType, shape: squareWeightsShape, initializationInfo: recurrentWeightInitialization, numGates: bidirectional ? 6 : 3)
+            if (bidirectional) {
+                rweights = try CreateTensor.createReshapedTensor(from: rweights, newShape: rweightsShape)
+            }
+        }
+        else {
+            rweights = try CreateTensor.createWeightInitializationTensor(type: weightType, shape: rweightsShape, initializationInfo: recurrentWeightInitialization, numInputs: stateSize, numOutput: stateSize)
+        }
         let rweightData = rweights.getData()
         let rweightName = graph.getFullName(name)! + "_recurrentWeights"
         let rweightTensor = graph.mpsgraph.variable(with: rweightData, shape: rweightsShape.getMPSShape(), dataType: rweights.type.getMPSDataType(), name: rweightName)
@@ -225,7 +247,7 @@ public class GRULayer: UnaryNode {
         addedTensors.append(rweightTensor)
         
         //  If we are adding load or reset assignments, put this variable on the list for load assignments
-        var node = Variable(dataType: .float32, shape: rweightsShape, randomValueRange: rweightsRange, name: rweightName)
+        var node = try Variable.createWeightInitializationVariable(type: weightType, shape: rweightsShape, initializationInfo: recurrentWeightInitialization, numInputs: stateSize, numOutput: stateSize, orthogonal: recurrentWeightOrthogonalization, name: rweightName)
         if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
             let loadResetAssignInfo = LoadResetAssignInfo(node: node, variableTensor: rweightTensor, sourceTensor: nil)
             graph.loadResetAssignList.append(loadResetAssignInfo)
@@ -237,9 +259,8 @@ public class GRULayer: UnaryNode {
         }
         
         //  Add the input weights variable
-        let iweightsShape = TensorShape([3*stateSize, numInputs])       //  [3H, I]
-        let iweightsRange = try ParameterRange(minimum: recurrentWeightInitialMinimum, maximum: recurrentWeightInitialMaximum)
-        let iweights = TensorFloat32(shape: iweightsShape, randomValueRange: iweightsRange)
+        let iweightsShape = TensorShape([(bidirectional ? 6 : 3) * stateSize, numInputs])       //  [3H, I] or [6H, I] for bidirectional
+        let iweights = try CreateTensor.createWeightInitializationTensor(type: weightType, shape: iweightsShape, initializationInfo: inputWeightInitialization, numInputs: numInputs, numOutput: stateSize)
         let iweightData = iweights.getData()
         let iweightName = graph.getFullName(name)! + "_inputWeights"
         let iweightTensor = graph.mpsgraph.variable(with: iweightData, shape: iweightsShape.getMPSShape(), dataType: iweights.type.getMPSDataType(), name: iweightName)
@@ -247,7 +268,7 @@ public class GRULayer: UnaryNode {
         addedTensors.append(iweightTensor)
         
         //  If we are adding load or reset assignments, put this variable on the list for load assignments
-        node = Variable(dataType: .float32, shape: iweightsShape, randomValueRange: iweightsRange, name: iweightName)
+        node = try Variable.createWeightInitializationVariable(type: weightType, shape: iweightsShape, initializationInfo: inputWeightInitialization, numInputs: numInputs, numOutput: stateSize, name: iweightName)
         if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
             let loadResetAssignInfo = LoadResetAssignInfo(node: node, variableTensor: iweightTensor, sourceTensor: nil)
             graph.loadResetAssignList.append(loadResetAssignInfo)
@@ -259,17 +280,16 @@ public class GRULayer: UnaryNode {
         }
         
         //  Add the bias variable
-        let biasShape = TensorShape([3*stateSize])       //  [3H]
-        let biasRange = try ParameterRange(minimum: recurrentWeightInitialMinimum, maximum: recurrentWeightInitialMaximum)
-        let bias = TensorFloat32(shape: biasShape, randomValueRange: biasRange)
-        let biasData = bias.getData()
+        let biasShape = TensorShape([(bidirectional ? 6 : 3) * stateSize])       //  [3H] or [6H] for bidirectional
+        let biases = CreateTensor.constantValues(type: weightType, shape: biasShape, initialValue: biasInitialValue)
+        let biasData = biases.getData()
         let biasName = graph.getFullName(name)! + "_bias"
-        let biasTensor = graph.mpsgraph.variable(with: biasData, shape: biasShape.getMPSShape(), dataType: bias.type.getMPSDataType(), name: biasName)
+        let biasTensor = graph.mpsgraph.variable(with: biasData, shape: biasShape.getMPSShape(), dataType: weightType.getMPSDataType(), name: biasName)
         suffixes.append("_bias")
         addedTensors.append(biasTensor)
         
         //  If we are adding load or reset assignments, put this variable on the list for load assignments
-        node = Variable(dataType: .float32, shape: biasShape, randomValueRange: biasRange, name: biasName)
+        node = Variable(dataType: weightType, shape: biasShape, initialValue: biasInitialValue, name: biasName)
         if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
             let loadResetAssignInfo = LoadResetAssignInfo(node: node, variableTensor: biasTensor, sourceTensor: nil)
             graph.loadResetAssignList.append(loadResetAssignInfo)
@@ -282,7 +302,7 @@ public class GRULayer: UnaryNode {
         
         //  Create the descriptor
         let descriptor = MPSGraphGRUDescriptor()
-        descriptor.bidirectional = false
+        descriptor.bidirectional = bidirectional
         descriptor.flipZ = false
         descriptor.outputGateActivation = outputGateActivation
         descriptor.resetAfter = false
@@ -358,27 +378,31 @@ public class GRULayer: UnaryNode {
         return self
     }
 
-    ///  Modifier to set the range for the random initializer of the recurrent weights.  Default is -0.5 to 0.5
-    public func recurrentWeightInitialRange(min: Double, max: Double) -> GRULayer {
-        recurrentWeightInitialMinimum = min
-        recurrentWeightInitialMaximum = max
+    ///  Modifier to set the initializer parameters for the recurrent weights
+    public func recurrentWeightInitialization(initializerInfo: WeightInitialization, orthogonalize: Bool = true) -> GRULayer {
+        recurrentWeightInitialization = initializerInfo
+        self.recurrentWeightOrthogonalization = orthogonalize
+        return self
+    }
+
+    ///  Modifier to set the initializer parameters for the input weights
+    public func inputWeightInitialization(initializerInfo: WeightInitialization) -> GRULayer {
+        inputWeightInitialization = initializerInfo
         return self
     }
     
-    ///  Modifier to set the range for the random initializer of the input weights.  Default is -0.5 to 0.5
-    public func inputWeightInitialRange(min: Double, max: Double) -> GRULayer {
-        inputWeightInitialMinimum = min
-        inputWeightInitialMaximum = max
+    ///  Modifier to set the initialization value for the initialization of the biases
+    public func biasInitialValue(initialValue: Double) -> GRULayer {
+        self.biasInitialValue = initialValue
         return self
     }
     
-    ///  Modifier to set the range for the random initializer of the bias.  Default is -0.5 to 0.5
-    public func biasInitialRange(min: Double, max: Double) -> GRULayer {
-        biasInitialMinimum = min
-        biasInitialMaximum = max
+    ///  Modifier to make the recurrent layer bidirectional
+    public func makeBidirectional() -> GRULayer {
+        self.bidirectional = true
         return self
     }
-    
+
     ///  Modifier to set the node output options
     /// - Parameters:
     ///   - createLastState: (Optional) if true the last state tensor of the time loop is separated out and made it's own output tensor with suffix "_lastState".  Defaults to true

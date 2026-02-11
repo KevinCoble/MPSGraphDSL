@@ -110,7 +110,7 @@ struct RNNTests {
                 PlaceHolder(shape: [1], modes: ["learn"], name: "expectedValue")
                 MeanSquaredErrorLoss(actual: "expectedValue", predicted: "result", name: "loss")
                     .targetForModes(["lossCalc", "learn"])
-                Learning(constant: true, learningRate: 0.05, learningModes: ["learn"])
+                Learning(constant: true, learningRate: 0.1, learningModes: ["learn"])
             }
             
             //  Run an input in

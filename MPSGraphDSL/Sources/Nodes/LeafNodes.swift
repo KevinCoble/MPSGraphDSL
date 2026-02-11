@@ -198,7 +198,8 @@ public class Variable : Node {
     internal enum VariableSource {
         case tensor(Tensor)
         case tensorReference(String)
-        case randomValues(ParameterRange)
+        case randomUniformValues(range: ParameterRange, orthogonal: Bool)
+        case randomNormalValues(mean: Double, standardDeviation: Double, orthogonal: Bool)
         case constant(Double)
         case inputTensor(String)
     }
@@ -230,19 +231,32 @@ public class Variable : Node {
         super.init(name: name)
     }
     
-    /// Contruct a Variable node with the specified type, shape, and random values
+    /// Contruct a Variable node with the specified type, shape, and uniform random values
     /// - Parameters:
     ///   - dataType: the type of data stored by the variable
     ///   - shape: the shape of the data stored by the variable
     ///   - randomValueRange: the range of random values used to initialize the variable
     ///   - name: The name for this node and its associated tensor
-    public init(dataType: DataType, shape : TensorShape, randomValueRange: ParameterRange, name: String) {
-        self.valueSource = .randomValues(randomValueRange)
+    public init(dataType: DataType, shape : TensorShape, randomValueRange: ParameterRange, orthogonal: Bool = false, name: String) {
+        self.valueSource = .randomUniformValues(range: randomValueRange, orthogonal: orthogonal)
         self.dataType = dataType
         self.shape = shape
         super.init(name: name)
     }
     
+    /// Contruct a Variable node with the specified type, shape, and gaussian random values
+    /// - Parameters:
+    ///   - dataType: the type of data stored by the variable
+    ///   - shape: the shape of the data stored by the variable
+    ///   - randomValueRange: the range of random values used to initialize the variable
+    ///   - name: The name for this node and its associated tensor
+    public init(dataType: DataType, shape : TensorShape, randomMean: Double, randomStdDev: Double, orthogonal: Bool = false, name: String) {
+        self.valueSource = .randomNormalValues(mean: randomMean, standardDeviation: randomStdDev, orthogonal: orthogonal)
+        self.dataType = dataType
+        self.shape = shape
+        super.init(name: name)
+    }
+
     /// Construct a Variable node with the specified type and shape, and constant values for all entries
     /// - Parameters:
     ///   - dataType: the type of data stored by the variable
@@ -290,8 +304,28 @@ public class Variable : Node {
             else {
                 throw DataParsingErrors.ReferencedDataTensorNotFound(tensorReference)
             }
-        case .randomValues(let range):
-            tensor = CreateTensor.randomValues(type: dataType!, shape: shape!, range: range)
+        case .randomUniformValues(let range, let orthogonal):
+            if (orthogonal) {
+                //  Assume square for each gate
+                let numGates = shape!.dimensions[0] / shape!.dimensions[1]
+                let squareShape = TensorShape([shape!.dimensions[1], shape!.dimensions[1]])
+                let initializationInfo = WeightInitialization.uniform(min: range.min.asDouble, max: range.max.asDouble)
+                tensor = try CreateTensor.createOrthogonalWeightInitializationTensor(type: dataType!, shape: squareShape, initializationInfo: initializationInfo, numGates: numGates)
+            }
+            else {
+                tensor = CreateTensor.randomUniformValues(type: dataType!, shape: shape!, range: range)
+            }
+        case .randomNormalValues(let mean, let standardDeviation, let orthogonal):
+            if (orthogonal) {
+                //  Assume square for each gate
+                let numGates = shape!.dimensions[0] / shape!.dimensions[1]
+                let squareShape = TensorShape([shape!.dimensions[1], shape!.dimensions[1]])
+                let initializationInfo = WeightInitialization.normal(mean: mean, standardDeviation: standardDeviation)
+                tensor = try CreateTensor.createOrthogonalWeightInitializationTensor(type: dataType!, shape: squareShape, initializationInfo: initializationInfo, numGates: numGates)
+            }
+            else {
+                tensor = CreateTensor.randomNormalValues(type: dataType!, shape: shape!, mean: mean, standardDeviation: standardDeviation)
+            }
         case .constant(let value):
             tensor = CreateTensor.constantValues(type: dataType!, shape: shape!, initialValue: value)
         case .inputTensor:
@@ -335,6 +369,32 @@ public class Variable : Node {
         return [variable]
     }
     
+    public static func createWeightInitializationVariable(type: DataType, shape: TensorShape, initializationInfo: WeightInitialization, numInputs: Int, numOutput: Int, orthogonal: Bool = false, name: String) throws -> Variable {
+        switch initializationInfo {
+        case .uniform(let min, let max):
+            let range = try ParameterRange(minimum: min, maximum: max)
+            return Variable(dataType: type, shape : shape, randomValueRange: range, orthogonal: orthogonal, name: name)
+        case .normal(let mean, let standardDeviation):
+            return Variable(dataType: type, shape : shape, randomMean: mean, randomStdDev: standardDeviation, orthogonal: orthogonal, name: name)
+        case .XavierGlorotUniform:
+            let max = sqrt(6.0 / Double(numInputs + numOutput))
+            let min = -max
+            let range = try ParameterRange(minimum: min, maximum: max)
+            return Variable(dataType: type, shape : shape, randomValueRange: range, orthogonal: orthogonal, name: name)
+        case .HeUniform:
+            let max = sqrt(6.0 / Double(numInputs))
+            let min = -max
+            let range = try ParameterRange(minimum: min, maximum: max)
+            return Variable(dataType: type, shape : shape, randomValueRange: range, orthogonal: orthogonal, name: name)
+        case .XavierGlorotNormal:
+            let standardDeviation = sqrt(2.0 / Double(numInputs + numOutput))
+            return Variable(dataType: type, shape : shape, randomMean: 0.0, randomStdDev: standardDeviation, orthogonal: orthogonal, name: name)
+        case .HeNormal:
+            let standardDeviation = sqrt(2.0 / Double(numInputs))
+            return Variable(dataType: type, shape : shape, randomMean: 0.0, randomStdDev: standardDeviation, orthogonal: orthogonal, name: name)
+        }
+    }
+    
     internal func getResetData(forGraph: Graph) throws -> MPSGraphTensorData? {
         switch (valueSource) {
         case .tensor(let sourceTensor):
@@ -346,9 +406,32 @@ public class Variable : Node {
             else {
                 return nil
             }
-        case .randomValues(let range):
-            let tensor = CreateTensor.randomValues(type: dataType!, shape: shape!, range: range)
-            return try tensor.getMPSGraphTensorData(forGraph: forGraph)
+        case .randomUniformValues(let range, let orthogonal):
+            if (orthogonal) {
+                //  Assume square for each gate
+                let numGates = shape!.dimensions[0] / shape!.dimensions[1]
+                let squareShape = TensorShape([shape!.dimensions[1], shape!.dimensions[1]])
+                let initializationInfo = WeightInitialization.uniform(min: range.min.asDouble, max: range.max.asDouble)
+                let tensor = try CreateTensor.createOrthogonalWeightInitializationTensor(type: dataType!, shape: squareShape, initializationInfo: initializationInfo, numGates: numGates)
+                return try tensor.getMPSGraphTensorData(forGraph: forGraph)
+            }
+            else {
+                let tensor = CreateTensor.randomUniformValues(type: dataType!, shape: shape!, range: range)
+                return try tensor.getMPSGraphTensorData(forGraph: forGraph)
+            }
+        case .randomNormalValues(let mean, let standardDeviation, let orthogonal):
+            if (orthogonal) {
+                //  Assume square for each gate
+                let numGates = shape!.dimensions[0] / shape!.dimensions[1]
+                let squareShape = TensorShape([shape!.dimensions[1], shape!.dimensions[1]])
+                let initializationInfo = WeightInitialization.normal(mean: mean, standardDeviation: standardDeviation)
+                let tensor = try CreateTensor.createOrthogonalWeightInitializationTensor(type: dataType!, shape: squareShape, initializationInfo: initializationInfo, numGates: numGates)
+                return try tensor.getMPSGraphTensorData(forGraph: forGraph)
+            }
+            else {
+                let tensor = CreateTensor.randomNormalValues(type: dataType!, shape: shape!, mean: mean, standardDeviation: standardDeviation)
+                return try tensor.getMPSGraphTensorData(forGraph: forGraph)
+            }
         case .constant(let value):
             let tensor = CreateTensor.constantValues(type: dataType!, shape: shape!, initialValue: value)
             return try tensor.getMPSGraphTensorData(forGraph: forGraph)
