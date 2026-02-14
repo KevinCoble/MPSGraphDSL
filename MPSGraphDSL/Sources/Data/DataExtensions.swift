@@ -39,9 +39,7 @@ extension Int32 : DataConvertible { }
 extension UInt32 : DataConvertible { }
 extension Int : DataConvertible { }
 extension UInt64 : DataConvertible { }
-#if os(iOS)
 extension Float16 : DataConvertible { }
-#endif
 extension Float32 : DataConvertible { }
 extension Double : DataConvertible { }
 extension CGFloat : DataConvertible { }

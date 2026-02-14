@@ -207,6 +207,8 @@ public class Variable : Node {
     var dataType: DataType?
     var shape: TensorShape?
     var lossNode: String? = nil
+    var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
+    var gradientClipping: (min: Double, max: Double)? = nil
     var referenceTensor: Tensor? = nil
 
     /// Construct a Variable node with shape, type,  and initial values from a ``Tensor``
@@ -282,10 +284,15 @@ public class Variable : Node {
     }
 
     /// Modifier to configure the Variable to learn
-    /// - Parameter lossNode: the name of the loss calculation in the Graph
+    /// - Parameters:
+    ///   - mode: lossNode: the name of the loss calculation in the Graph
+    ///   - using: (Optional) the optimizer method to use for learning.  Defaults to stochastic gradient descent
+    ///   - gradientClipping: (Optional) defaults to nil.  A tuple with the minimum and maximum gradient values allowed in the back-propogation for this node.  The gradient is clipped to this range before being used by the optimizer
     /// - Returns: The modified Variable
-    public func learnWithRespectTo(_ lossNode: String) -> Variable {
+    public func learnWithRespectTo(_ lossNode: String, using: LearningOptimizer = .stochasticGradientDescent, gradientClipping: (min: Double, max: Double)? = nil) -> Variable {
         self.lossNode = lossNode
+        self.learningOptimizer = using
+        self.gradientClipping = gradientClipping
         return self
     }
 
@@ -362,7 +369,8 @@ public class Variable : Node {
 
         //  If this is a learning variable - add to the list to get assignment operations for
         if let lossNode = lossNode {
-            graph.learningVariables.append((variable: self, tensor: variable, loss: lossNode))
+            let learningVariable = LearningVariable(variable: self, tensor: variable, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            graph.learningVariables.append(learningVariable)
         }
         
         //  Return the created MPSGraphTensor

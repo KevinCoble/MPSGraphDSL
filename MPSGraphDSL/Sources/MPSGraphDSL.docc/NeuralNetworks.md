@@ -8,20 +8,22 @@ The following composite nodes are available:
 | Network Layer            | Description |
 | ------------------------ | ----------- |
 | ``MeanSquaredErrorLoss`` | The loss function using a mean-squared error calculation                                                     |
+| ``MeanAbsoluteErrorLoss``| The loss function using a mean-absolute-difference error calculation                                         |
 | ``FullyConnectedLayer``  | A standard fully-connected layer with optional bias term and activation function                             |
 | ``RNNLayer``             | A standard one-gate recursivve neural newtwork layer.  Weights, biases and activation functions are managed  |
 | ``LSTMLayer``            | The long short term memory layer, with all four gates.  Weights, biases and activation functions are managed |
 | ``GRULayer`` (alpha!)    | The gated recursive unit layer, with all three gates.  Weights, biases and activation functions are managed |
 | ``PoolingLayer``         | A pooling layer, with three possible pooling functions.  Tensor ranks are managed (MPSGraph requires 4D inputs)|
 | ``ConvolutionLayer``     | A convolution layer, with two-dimensional or three-dimensional kernels.  Tensor ranks are managed (MPSGraph requires 4D or 5D inputs)|
+| ``BatchNormalization``   | A node to batch normalize the outputs of a previous layer.  Weights, biases, mean, and variance tensors are managed|
 
 In addition, topics in this article discuss how to use the Graph functions to test and train both classification and regression networks.
 
-### MeanSquaredErrorLoss
+### MeanSquaredErrorLoss and MeanAbsoluteErrorLoss
 
-The mean-squared error loss function takes the difference of the actual versus the predicted value, squares it and takes the mean of the values.  It is commonly used as the loss function for a regression problem
+The mean-squared error and mean-absolute loss functions takes the difference of the actual versus the predicted value, squares it or takes the absolute value of it, and then takes the mean of the values.  It is commonly used as the loss function for a regression problem
 
-####  Creating a MeanSquaredErrorLoss
+####  Creating a MeanSquaredErrorLoss or MeanAbsoluteErrorLoss
 
 The following initializer is used in a Graph (or SubGraph) definition to add a MeanSquaredErrorLoss:
 
@@ -30,6 +32,8 @@ MeanSquaredErrorLoss(actual: String? = nil, predicted: String? = nil, name: Stri
 ```
 
 The actual and predicted inputs are names of tensors (or if nil it assumes the previous node's tensor) for the actual output (usually a ``PlaceHolder`` with the output tensor of a ``DataSet``) and the networks predicted output
+
+Creating a ``MeanAbsoluteErrorLoss`` is createdthe same way, but uses the MeanAbsoluteErrorLoss node name instead.
 
 ### FullyConnectedLayer
 
@@ -53,7 +57,6 @@ The activation function is selected from the enumeration ``ActivationFunction``.
 
 The input tensor and node name are standard parameters.  See the article on Creating Graphs for more information.
 
-
 ####  Modifiers for a FullyConnectedLayer
 
 The following modifiers are available for the FullyConnectedLayer node:
@@ -63,7 +66,7 @@ The following modifiers are available for the FullyConnectedLayer node:
 |  noBiasTerm()                     |  If added removes the bias Variable and the addition of it to the matrix multiplication  |
 |  weightInitialization(initializerInfo:)   |  Sets the method and parameters for random initialization of the weights Variable       |
 |  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
-|  learnWithRespectTo(_ lossNode)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the FullyConnectedLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -143,7 +146,7 @@ The following modifiers are available for the RNNLayer node:
 |  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
 |  makeBidirectional()     |  Makes the layer bidirectional                          |
 |  setOutput(createLastState, targetLoops, targetLasts)  |  Sets the output flags.  See above discussion   |
-|  learnWithRespectTo(_ lossNode)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode, gradientClipping, using:)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the RNNLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -231,7 +234,7 @@ The following modifiers are available for the LSTMLayer node:
 |  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
 |  makeBidirectional()     |  Makes the layer bidirectional                          |
 |  setOutput(produceCellOutput, createLastState, createLastCell, targetLoops, targetLasts)  |  Sets the output flags.  See above discussion   |
-|  learnWithRespectTo(_ lossNode)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode, gradientClipping, using:)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the LSTMLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -313,7 +316,7 @@ The following modifiers are available for the GRULayer node:
 |  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
 |  makeBidirectional()     |  Makes the layer bidirectional                          |
 |  setOutput(createLastState, targetLoops, targetLasts)  |  Sets the output flags.  See above discussion   |
-|  learnWithRespectTo(_ lossNode)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode, gradientClipping, using:)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the GRULayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -472,7 +475,7 @@ The following modifiers are available for the ConvolutionLayer node:
 |  biasInitialRange(min:, max:)     |  Sets the range for random initialization of the bias Variable                           |
 |  padding(bottomPadding:, topPadding:, leftPadding:, rightPadding:, backPadding:, frontPadding:, paddingStyle:)   |  Sets the padding parameters      |
 |  dilationRates(dilationRateH:, dilationRateW:, dilationRateD:)   |  Sets the dilation rates for all dimensions of the kernel      |
-|  learnWithRespectTo(_ lossNode)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
 
 ####  Tensors Added by a ConvolutionLayer
 
@@ -493,3 +496,78 @@ The following tensors may be added to the Graph by the node:
 These tensors can be referenced using the name of the node with the suffix added.  The last tensor will always be named with just the given (required) node name with no suffix.  This allows the node output to be referenced without regard to options
 
 Only the last tensor will become a target if the node is configured to be a target.
+
+### BatchNormalization
+
+A batch normalization layer is a standard neural network layer often put after a fully-connected or convolution layer.  It is used to speed training by normalizing the outputs of the previous layer, applying learned scaling and shifting values to each feature of the input tensor.
+
+The batch normalization layer is often put before the activation portion of the previous layer.  To allow for this the BatchNormalization node accepts an activation function that will be performed after the normalization function.  Just set the activation of the previous layer to '.none' and that layers activation function to the BatchNormalization layer.
+
+####  Creating a BatchNormalization Layer
+
+The following initializer is used in a Graph (or SubGraph) definition to add a BatchNormalization layer:
+
+```swift
+BatchNormalization(input: String? = nil, ϵ: Double = 1.0e-5, momentum: Double = 0.9, featureDimensions: [Int]? = nil, activationFunction: ActivationFunction = .none, name: String)
+```
+
+The input tensor and node name are standard parameters.  See the article on Creating Graphs for more information.
+
+The ϵ and momentum parameters are the standard batch normalization parameters of the same name.  Please see other documentation on batch normalization for more discussion of their use and standard values than is possible in this document.  The default values are those that are most commonly used.
+
+The featureDimensions parameter is an optional array of dimension indices giving the axes of the input tensor that are considered 'feature' dimensions.  Non-feature dimensions are combined in the mean/variance calculations of the batch normalization.  If the graph is created as a batch graph the first dimension (index 0) will be automatically added as a non-feature dimension.  If the previous layer is a fully-connected layer, all output dimensions (except the possible batch dimension) are feature dimensions.  If the previous layer is convolution layer, you will need to specify the feature layers, as the row-column-depth dimensions are generally not feature dimensions.  The feature dimension location on convolution layers can be moved with a modifier, so it cannot easily be determined by this layer.  An example of a convolution output format is NHWC - batch x height x width x channel.  The channel dimension is the only feature dimension, so you would pass a \[3\] for the featureDimensions parameter.
+
+The activation function is selected from the enumeration ``ActivationFunction``.  To turn off activation, select the option '.none'.
+
+####  Modifiers for a BatchNormalization Layer
+
+The following modifier is available for the BatchNormalization node:
+
+| Modifier            | Description |
+| ----------------------------------| ----------- |
+|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+
+As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the FullyConnectedLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
+
+####  Tensors Added by a BatchNormalization Layer
+
+The following tensors are added to the Graph by the node:
+
+| Suffix                | Targetted | Description |
+| --------------------- | --------- | ---------------------- |
+| "_gamma"              |     No     | The learned gamma scaling variable        |
+| "_beta"               |     No     | The learned beta offset variable        |
+| "_runningMean"        |     No     | The calculated and saved (but not learned) running mean of the feature elements       |
+| "_runningVariance"    |     No     | The calculated and saved (but not learned) running variance of the feature elements        |
+| "_ϵ"                  |     No     | The provided epsilon constant  |
+| "_momentum"           |     No     | The provided momentum constant        |
+| "_training_mean"      |     No     | The calculated mean of the current inputs        |
+| "_training_variance"  |     No     | The calculated variance of the current inputs        |
+| "_training_numerator" |     No     | The numerator of the batch normalization x-hat calculation for training modes        |
+| "_training_variance_plus_epsilon" |     No     | The sumation of the variance plus epsilon constant for training modes      |
+| "_training_denominator" |     No     | The denominator of the batch normalization x-hat calculation for training modes       |
+| "_training_x_hat"     |     No     | The x-hat calculation for training modes        |
+| "_one"                |     No     | A constant 1 tensor        |
+| "_one_minus_momentum" |     No     | One minus the momentum constant       |
+| "_one_minus_momentum_times_mean" |     No     | (One minus the momentum) times the batch mean      |
+| "_momentum_times_running_mean" |     No     | The momentum constant times the running mean      |
+| "_new_running_mean"   |     No     | The calculated update to the running mean     |
+| "_one_minus_momentum_times_variance" |     No     | (One minus the momentum) times the batch variance      |
+| "_momentum_times_running_variance" |     No     | The momentum constant times the running variance      |
+| "_new_running_variance"   |     No     | The calculated update to the running variance     |
+| "_testing_numerator" |     No     | The numerator of the batch normalization x-hat calculation for testing modes       |
+| "_testing_variance_plus_epsilon" |     No     | The sumation of the running variance plus epsilon constant for testing modes      |
+| "_testing_denominator" |     No     | The denominator of the batch normalization x-hat calculation for testing modes        |
+| "_testing_x_hat"     |     No     | The x-hat calculation for testing modes        |
+| "_x_hat"             |     No     | The x-hat selected based on the current mode (training or testing)        |
+| "_gamma_times_x_hat" |     No     | x-hat times the learned gamma variable        |
+| "_batchNormalization"|    Yes     | The batch normalization output.  If no activation function there will be no suffix on this tensor  |
+| None.                |    Yes     | (If configured) The activation function.  Set as a target if node configured as target       |
+
+Note:  Any of the above tensors that can become the target will have their suffix removed (named with just the layer's node name) when they are the target tensor.  This makes the name of the output of the node the same regardless of configuration.
+
+These tensors can be referenced using the name of the node with the suffix added.
+
+####  Additional Data in the BatchNormalization Layer
+
+The batch normalization process uses a calculated mean and variance of the batch of input data to normalize those values.  The running average of those two calculations are determined during training, and those averages are used in non-learning (inference) modes.  The running mean and variance variables, while not specifically 'learned', should be saved after training along with any other learned weights (such as the beta and gamma tensors of the batch normalization layer) and placed back into the variables for inference - if the graph is reloaded after training.  The running mean and variance tensors are added to the load-reset variable list automatically by the node.

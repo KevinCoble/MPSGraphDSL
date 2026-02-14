@@ -42,6 +42,21 @@ internal struct feedTensorInfo {
     }
 }
 
+/// Enumeration for selecting the learning optimizer to be used for a layer
+public enum LearningOptimizer: Sendable {
+    case stochasticGradientDescent
+    case adamOptimizer
+    case adamOptimizerWithMaxVelocity
+}
+
+internal struct LearningVariable {
+    let variable: Variable
+    let tensor: MPSGraphTensor
+    let loss: String
+    let clipping: (min: Double, max: Double)?
+    let optimizer: LearningOptimizer
+}
+
 ///  Options for building a Graph object
 public struct BuildOptions: OptionSet, Sendable {
     ///  The complete option set
@@ -81,21 +96,35 @@ public class Graph {
     internal var loadResetAssignList: [LoadResetAssignInfo] = []
     internal var loadOps: [MPSGraphOperation] = []
     internal var resetOps: [MPSGraphOperation] = []
-    internal var learningVariables: [(variable: Variable, tensor: MPSGraphTensor, loss: String)] = []
+    internal var learningVariables: [LearningVariable] = []
     internal var seenLearning = false
-    
+    internal var nodeLearningOps: [MPSGraphOperation] = []
+    internal var nodeNonLearningOps: [MPSGraphOperation] = []
+
     ///  Flag for if the graph is built to accomodate batch processing
     public private(set) var batchGraph = false
     public private(set) var batchSize = 1
 
     //  Learning values
+    internal var learningNodeName: String = "*UnnamedLearningNode*"
     internal var learningRateConstant = true
     internal var learningRate: Double = 0.05
     internal var learningRateTensor: MPSGraphTensor? = nil
     internal var learningModes : [String] = []
     internal var learningOps: [MPSGraphOperation] = []
-    
-    
+    internal var β1Constant = true
+    internal var β1: Double = 0.9
+    internal var β2Constant = true
+    internal var β2: Double = 0.999
+    internal var ϵConstant = true
+    internal var ϵ: Double = 1.0e-7
+    internal var β1Tensor: MPSGraphTensor? = nil
+    internal var β2Tensor: MPSGraphTensor? = nil
+    internal var ϵTensor: MPSGraphTensor? = nil
+
+    //  Node for determining if in training or testing pass.  Needed for BatchNormalization
+    internal var trainingModeTensor: MPSGraphTensor? = nil
+
     internal init(batchSize: Int, buildOptions: BuildOptions, nodes: [Node]) {
         self.batchSize = batchSize
         if (batchSize > 1) { batchGraph = true }
@@ -108,7 +137,6 @@ public class Graph {
             node.clearReferencedFlag()
         }
     }
-
     /// Create the MPSGraph object from the nodes in the Graph.  Done automatically from any run or encode operation
     ///
     /// - Throws: `MPSGraphDSLErrors.NamedTensorNotFound` if a referenced tensor name is not found in the Graph's node list
@@ -135,6 +163,8 @@ public class Graph {
         resetOps = []
         learningVariables = []
         learningOps = []
+        nodeLearningOps = []
+        nodeNonLearningOps = []
         
         //  Process the top-level nodes
         try processNodes(nodes)
@@ -157,10 +187,34 @@ public class Graph {
             }
             
             //  Get a list of the loss variables
+            var haveAdamOptimizer = false
             var lossNames: [String] = []
             for lv in learningVariables {
                 if (!lossNames.contains(lv.loss)) {
                     lossNames.append(lv.loss)
+                }
+                if (lv.optimizer != .stochasticGradientDescent) { haveAdamOptimizer = true }
+            }
+            
+            //  If we have some adam optimizers, add the beta and epsilon parameter tensors
+            if (haveAdamOptimizer) {
+                if β1Constant {
+                    β1Tensor = mpsgraph.constant(β1, shape: [1 as NSNumber], dataType: .float32)
+                }
+                else {
+                    β1Tensor = mpsgraph.placeholder(shape: [1 as NSNumber], name: learningNodeName + "_β1")
+                }
+                if β2Constant {
+                    β2Tensor = mpsgraph.constant(β2, shape: [1 as NSNumber], dataType: .float32)
+                }
+                else {
+                    β2Tensor = mpsgraph.placeholder(shape: [1 as NSNumber], name: learningNodeName + "_β2")
+                }
+                if ϵConstant {
+                    ϵTensor = mpsgraph.constant(ϵ, shape: [1 as NSNumber], dataType: .float32)
+                }
+                else {
+                    ϵTensor = mpsgraph.placeholder(shape: [1 as NSNumber], name: learningNodeName + "_β1")
                 }
             }
             
@@ -178,15 +232,99 @@ public class Graph {
                     //  Create a gradient tensor for the loss node and all variables that use it
                     let gradTensors = mpsgraph.gradients(of: lossNode.mpstensor, with: variableTensors, name: nil)
                     
-                    //  Add a stochastic gradient descent for each variable tensor gradient
+                    //  Add an optimizer for each variable tensor gradient
                     for (key, value) in gradTensors {
-                        let updateTensor = mpsgraph.stochasticGradientDescent(learningRate: learningRateTensor!,
-                                                                              values: key,
-                                                                              gradient: value,
-                                                                              name: nil)
-                        let assign = mpsgraph.assign(key, tensor: updateTensor, name: nil)
-                        learningOps.append(assign)
-                    }
+                        //  Find the optimizer to use for this gradient
+                        let lv = learningVariables.first(where: { $0.tensor === key })
+                        if (lv == nil) { throw GenericMPSGraphDSLErrors.InternalError }
+                        let optimizer = lv!.optimizer
+                        
+                        //  If a gradient clip was provided, add the clipping mechanism
+                        let gradientTensor: MPSGraphTensor
+                        if let clipping = lv!.clipping {
+                            let minTensor = mpsgraph.constant(clipping.min, shape: [1 as NSNumber], dataType: value.dataType)
+                            let maxTensor = mpsgraph.constant(clipping.max, shape: [1 as NSNumber], dataType: value.dataType)
+                            gradientTensor = mpsgraph.clamp(value, min: minTensor, max: maxTensor, name: nil)
+                        }
+                        else {
+                            gradientTensor = value
+                        }
+                        
+                        switch (optimizer) {
+                        case .stochasticGradientDescent:
+                            //  Add a stochastic gradient descent
+                            let updateTensor = mpsgraph.stochasticGradientDescent(learningRate: learningRateTensor!,
+                                                                                  values: key,
+                                                                                  gradient: gradientTensor,
+                                                                                  name: nil)
+                            let assign = mpsgraph.assign(key, tensor: updateTensor, name: nil)
+                            learningOps.append(assign)
+                        case .adamOptimizer:
+                            //  Create a momentum variable
+                            let type = lv!.variable.dataType!
+                            let shape = lv!.variable.shape!
+                            let initialValues = CreateTensor.constantValues(type: type, shape: shape, initialValue: 0.0)
+                            let initialData = initialValues.getData()
+                            let momentumName = lv!.variable.name! + "_momentum"
+                            let momentum = mpsgraph.variable(with: initialData, shape: shape.getMPSShape(), dataType: type.getMPSDataType(), name: momentumName)
+
+                            //  Create the velocity variable
+                            let velocityName = lv!.variable.name! + "_velocity"
+                            let velocity = mpsgraph.variable(with: initialData, shape: shape.getMPSShape(), dataType: type.getMPSDataType(), name: velocityName)
+                            
+                            //  Add the adam optimizer
+                            let updateTensors = mpsgraph.adam(currentLearningRate: learningRateTensor!,
+                                                              beta1: β1Tensor!, beta2: β2Tensor!, epsilon: ϵTensor!,
+                                                              values: key,
+                                                              momentum: momentum,
+                                                              velocity: velocity,
+                                                              maximumVelocity: nil,
+                                                              gradient: gradientTensor,
+                                                              name: lv!.variable.name! + "_adam")
+                            //  Add the assignment operations
+                            var assign = mpsgraph.assign(key, tensor: updateTensors[0], name: nil)
+                            learningOps.append(assign)
+                            assign = mpsgraph.assign(momentum, tensor: updateTensors[1], name: nil)
+                            learningOps.append(assign)
+                            assign = mpsgraph.assign(velocity, tensor: updateTensors[2], name: nil)
+                            learningOps.append(assign)
+                        case .adamOptimizerWithMaxVelocity:
+                            //  Create a momentum variable
+                            let type = lv!.variable.dataType!
+                            let shape = lv!.variable.shape!
+                            let initialValues = CreateTensor.constantValues(type: type, shape: shape, initialValue: 0.0)
+                            let initialData = initialValues.getData()
+                            let momentumName = lv!.variable.name! + "_momentum"
+                            let momentum = mpsgraph.variable(with: initialData, shape: shape.getMPSShape(), dataType: type.getMPSDataType(), name: momentumName)
+
+                            //  Create the velocity variable
+                            let velocityName = lv!.variable.name! + "_velocity"
+                            let velocity = mpsgraph.variable(with: initialData, shape: shape.getMPSShape(), dataType: type.getMPSDataType(), name: velocityName)
+
+                            //  Create the max-velocity variable
+                            let maxvelocityName = lv!.variable.name! + "_maxvelocity"
+                            let maxvelocity = mpsgraph.variable(with: initialData, shape: shape.getMPSShape(), dataType: type.getMPSDataType(), name: maxvelocityName)
+
+                            //  Add the adam optimizer
+                            let updateTensors = mpsgraph.adam(currentLearningRate: learningRateTensor!,
+                                                              beta1: β1Tensor!, beta2: β2Tensor!, epsilon: ϵTensor!,
+                                                              values: key,
+                                                              momentum: momentum,
+                                                              velocity: velocity,
+                                                              maximumVelocity: maxvelocity,
+                                                              gradient: gradientTensor,
+                                                              name: lv!.variable.name! + "_adam")
+                            //  Add the assignment operations
+                            var assign = mpsgraph.assign(key, tensor: updateTensors[0], name: nil)
+                            learningOps.append(assign)
+                            assign = mpsgraph.assign(momentum, tensor: updateTensors[1], name: nil)
+                            learningOps.append(assign)
+                            assign = mpsgraph.assign(velocity, tensor: updateTensors[2], name: nil)
+                            learningOps.append(assign)
+                            assign = mpsgraph.assign(maxvelocity, tensor: updateTensors[3], name: nil)
+                            learningOps.append(assign)
+                        }
+                     }
                 }
                 else {
                     throw MPSGraphDSLErrors.NamedTensorNotFound(lossName)
@@ -375,6 +513,15 @@ public class Graph {
         }
     }
     
+    //  Get the training mode tensor.  Create if needed
+    internal func getTrainingModeTensor() -> MPSGraphTensor {
+        if (trainingModeTensor == nil) {
+            trainingModeTensor = mpsgraph.placeholder(shape: [1], dataType: .int32, name: "*TrainingMode*")
+        }
+        
+        return trainingModeTensor!
+    }
+    
     //  Get the metal command buffer
     internal func getCommandQueue() {
         device = MTLCreateSystemDefaultDevice()!
@@ -388,9 +535,12 @@ public class Graph {
     /// - Parameters:
     ///   - mode: The mode that specifies what output tensors are to be computed
     ///   - inputTensors: an dictionary of input tensors to feed to the graph, with the key being the ``PlaceHolder`` name
-    ///   - newLearningRate: (Optional) if a non-constant learning rate is specified (see ``Learning``, the value can be changed for subsequent runs with this parameter
+    ///   - newLearningRate: (Optional) if a non-constant learning rate is specified (see ``Learning``), the value can be changed for subsequent runs with this parameter
+    ///   - newβ1: (Optional) if a non-constant β1 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
+    ///   - newβ2: (Optional) if a non-constant β2 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
+    ///   - newϵ: (Optional) if a non-constant ϵ parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
     /// - Returns: an array of output tensors that are the result of the graph run
-    public func runOne(mode: String, inputTensors: [String : Tensor], newLearningRate: Double? = nil) throws -> [String : Tensor] {
+    public func runOne(mode: String, inputTensors: [String : Tensor], newLearningRate: Double? = nil, newβ1: Double? = nil, newβ2: Double? = nil, newϵ: Double? = nil) throws -> [String : Tensor] {
         //  Verify the input tensors are usable
         var allAreBatchTensors: Bool = true
         for (key, value) in inputTensors {
@@ -412,11 +562,20 @@ public class Graph {
         if (mpsgraph == nil) { try buildGraph() }
         if (device == nil) { getCommandQueue() }
         
-        //  If a new learning rate entered - set it
+        //  If a new learning rate or adam optimization parameter entered - set it
         if let newlearningRate = newLearningRate {
             learningRate = newlearningRate
         }
-        
+        if let newβ1 = newβ1 {
+            β1 = newβ1
+        }
+        if let newβ2 = newβ2 {
+            β2 = newβ2
+        }
+        if let newϵ = newϵ {
+            ϵ = newϵ
+        }
+
         //  Convert the tensors to MPS version and create the feed dictionary
         var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [:]
         for feedTensor in feedTensors {
@@ -445,7 +604,25 @@ public class Graph {
             let learningRateValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(learningRate))
             feedDict[learningRateTensor!] = try learningRateValueTensor.getMPSGraphTensorData(forGraph: self)
         }
+        if (!β1Constant && β1Tensor != nil) {
+            let β1ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β1))
+            feedDict[β1Tensor!] = try β1ValueTensor.getMPSGraphTensorData(forGraph: self)
+        }
+        if (!β2Constant && β2Tensor != nil) {
+            let β2ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β2))
+            feedDict[β2Tensor!] = try β2ValueTensor.getMPSGraphTensorData(forGraph: self)
+        }
+        if (!ϵConstant && ϵTensor != nil) {
+            let ϵValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(ϵ))
+            feedDict[ϵTensor!] = try ϵValueTensor.getMPSGraphTensorData(forGraph: self)
+        }
         
+        //  If there is a training/testing mode tensor, add it to the feed
+        if (trainingModeTensor != nil) {
+            let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : learningModes.contains(mode) ? 1 : 0)
+            feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
+        }
+
         //  Get the targetTensors
         var targets : [MPSGraphTensor] = []
         for targetTensor in targetTensors {
@@ -459,6 +636,20 @@ public class Graph {
         var targetOperations : [MPSGraphOperation]? = nil
         if (learningModes.contains(mode)) {
             targetOperations = learningOps
+            //  Add the node learning operations
+            targetOperations! += nodeLearningOps
+        }
+        else {
+            if (!nodeNonLearningOps.isEmpty) {
+                //  Add any non-learning node operations
+                if (targetOperations == nil) {
+                    targetOperations = nodeNonLearningOps
+
+                }
+                else {
+                    targetOperations! += nodeNonLearningOps
+                }
+            }
         }
         
         //  Run the graph
@@ -497,8 +688,11 @@ public class Graph {
     ///   - inputTensors: an dictionary of input tensors to feed to the graph, with the key being the ``PlaceHolder`` name
     ///   - waitForResults: (Optional) defaults to true.  If true the operation waits for the results back from Metal.  If not needed (e.g. during training operations), set to false
     ///   - newLearningRate: (Optional) if a non-constant learning rate is specified (see ``Learning``, the value can be changed for subsequent runs with this parameter
+    ///   - newβ1: (Optional) if a non-constant β1 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
+    ///   - newβ2: (Optional) if a non-constant β2 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
+    ///   - newϵ: (Optional) if a non-constant ϵ parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
     /// - Returns: an array of output tensors that are the result of the graph run
-    public func encodeOne(mode: String, inputTensors: [String : Tensor], waitForResults: Bool = true, newLearningRate: Double? = nil) throws -> [String : Tensor] {
+    public func encodeOne(mode: String, inputTensors: [String : Tensor], waitForResults: Bool = true, newLearningRate: Double? = nil, newβ1: Double? = nil, newβ2: Double? = nil, newϵ: Double? = nil) throws -> [String : Tensor] {
         //  Verify the input tensors are usable
         var allAreBatchTensors: Bool = true
         for (key, value) in inputTensors {
@@ -522,11 +716,20 @@ public class Graph {
         
         let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
         
-        //  If a new learning rate entered - set it
+        //  If a new learning rate or adam optimization parameter entered - set it
         if let newlearningRate = newLearningRate {
             learningRate = newlearningRate
         }
-        
+        if let newβ1 = newβ1 {
+            β1 = newβ1
+        }
+        if let newβ2 = newβ2 {
+            β2 = newβ2
+        }
+        if let newϵ = newϵ {
+            ϵ = newϵ
+        }
+
         //  Convert the tensors to MPS version and create the feed dictionary
         var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [:]
         for feedTensor in feedTensors {
@@ -555,7 +758,26 @@ public class Graph {
             let learningRateValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(learningRate))
             feedDict[learningRateTensor!] = try learningRateValueTensor.getMPSGraphTensorData(forGraph: self)
         }
+        if (!β1Constant && β1Tensor != nil) {
+            let β1ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β1))
+            feedDict[β1Tensor!] = try β1ValueTensor.getMPSGraphTensorData(forGraph: self)
+        }
+        if (!β2Constant && β2Tensor != nil) {
+            let β2ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β2))
+            feedDict[β2Tensor!] = try β2ValueTensor.getMPSGraphTensorData(forGraph: self)
+        }
+        if (!ϵConstant && ϵTensor != nil) {
+            let ϵValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(ϵ))
+            feedDict[ϵTensor!] = try ϵValueTensor.getMPSGraphTensorData(forGraph: self)
+        }
         
+        //  If there is a training/testing mode tensor, add it to the feed
+        if (trainingModeTensor != nil) {
+            let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : learningModes.contains(mode) ? 1 : 0)
+            feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
+
+        }
+
         //  Get the targetTensors
         var targets : [MPSGraphTensor] = []
         for targetTensor in targetTensors {
@@ -569,8 +791,22 @@ public class Graph {
         var targetOperations : [MPSGraphOperation]? = nil
         if (learningModes.contains(mode)) {
             targetOperations = learningOps
+            //  Add the node learning operations
+            targetOperations! += nodeLearningOps
         }
-        
+        else {
+            if (!nodeNonLearningOps.isEmpty) {
+                //  Add any non-learning node operations
+                if (targetOperations == nil) {
+                    targetOperations = nodeNonLearningOps
+
+                }
+                else {
+                    targetOperations! += nodeNonLearningOps
+                }
+            }
+        }
+
         //  Run the graph
         let results = mpsgraph.encode(to: commandBuffer,
                                       feeds: feedDict,
@@ -710,8 +946,21 @@ public class Graph {
                 }
                 
                 //  Convert the input tensor to MPS version and create the feed dictionary
-                let feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forGraph: self)]
+                var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forGraph: self)]
                 
+                //  If there is a training/testing mode tensor, add it to the feed
+                if (trainingModeTensor != nil) {
+                    let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : 0)
+                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
+                }
+                
+                //  Set up the target operations
+                var targetOperations : [MPSGraphOperation]? = nil
+                if (!nodeNonLearningOps.isEmpty) {
+                    //  Add any non-learning node operations
+                    targetOperations = nodeNonLearningOps
+                }
+
                 //  Create the callback
                 let executionDesc = MPSGraphExecutionDescriptor()
                 let bSize = batchSize
@@ -750,7 +999,7 @@ public class Graph {
                 let _ = mpsgraph.encode(to: commandBuffer,
                                               feeds: feedDict,
                                               targetTensors: targets,
-                                              targetOperations: nil,
+                                              targetOperations: targetOperations,
                                               executionDescriptor: executionDesc)
 
                 commandBuffer.commit()
@@ -880,8 +1129,21 @@ public class Graph {
                 }
                 
                 //  Convert the input tensor to MPS version and create the feed dictionary
-                let feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forGraph: self)]
+                var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forGraph: self)]
                 
+                //  If there is a training/testing mode tensor, add it to the feed
+                if (trainingModeTensor != nil) {
+                    let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : 0)
+                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
+                }
+                
+                //  Set up the target operations
+                var targetOperations : [MPSGraphOperation]? = nil
+                if (!nodeNonLearningOps.isEmpty) {
+                    //  Add any non-learning node operations
+                    targetOperations = nodeNonLearningOps
+                }
+
                 //  Create the callback
                 let executionDesc = MPSGraphExecutionDescriptor()
                 executionDesc.completionHandler = { (resultsDictionary, nil) in
@@ -898,7 +1160,7 @@ public class Graph {
                 let _ = mpsgraph.encode(to: commandBuffer,
                                               feeds: feedDict,
                                               targetTensors: targets,
-                                              targetOperations: nil,
+                                              targetOperations: targetOperations,
                                               executionDescriptor: executionDesc)
 
                 commandBuffer.commit()
@@ -924,8 +1186,12 @@ public class Graph {
     ///   - expectedValueTensorName: The name of the input tensor for the expected value (PlaceHolder)
     ///   - lossTensorName: (Optional) The name of the output tensor for the loss calculation.  This node must be a target for the mode passed in
     ///   - epochSize: (Optional) The number of random samples, or random batches if a batch graph, the graph is trained on.  If nil all samples are processed sequentially.  Default is nil
+    ///   - newLearningRate: (Optional) if a non-constant learning rate is specified (see ``Learning``, the value can be changed for subsequent runs with this parameter
+    ///   - newβ1: (Optional) if a non-constant β1 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
+    ///   - newβ2: (Optional) if a non-constant β2 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
+    ///   - newϵ: (Optional) if a non-constant ϵ parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
     /// - Returns: The average loss value for the run - or nil if no loss tensor name was provided
-    public func runTraining(mode: String, trainingDataSet: DataSet, inputTensorName: String, expectedValueTensorName : String, lossTensorName: String? = nil, epochSize: Int? = nil) async throws -> Double? {
+    public func runTraining(mode: String, trainingDataSet: DataSet, inputTensorName: String, expectedValueTensorName : String, lossTensorName: String? = nil, epochSize: Int? = nil, newLearningRate: Double? = nil, newβ1: Double? = nil, newβ2: Double? = nil, newϵ: Double? = nil) async throws -> Double? {
         //  Verify the input tensors are usable
         if (!trainingDataSet.inputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
         if (!trainingDataSet.outputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
@@ -940,6 +1206,20 @@ public class Graph {
         if (mpsgraph == nil) { try buildGraph() }
         if (device == nil) { getCommandQueue() }
         
+        //  If a new learning rate or adam optimization parameter entered - set it
+        if let newlearningRate = newLearningRate {
+            learningRate = newlearningRate
+        }
+        if let newβ1 = newβ1 {
+            β1 = newβ1
+        }
+        if let newβ2 = newβ2 {
+            β2 = newβ2
+        }
+        if let newϵ = newϵ {
+            ϵ = newϵ
+        }
+
         //  Get the targetTensors
         var targets : [MPSGraphTensor] = []
         for targetTensor in targetTensors {
@@ -981,6 +1261,10 @@ public class Graph {
             let batchOutputTensorShape = trainingDataSet.outputShape.shapeWithAddedBatchDimension(batchSize)
             batchOutputTensor = CreateTensor.constantValues(type: trainingDataSet.inputType, shape: batchOutputTensorShape, initialValue: 0.0)
         }
+        
+        //  Set up any learning operations
+        var targetOperations = learningOps
+        targetOperations += nodeLearningOps
 
         //  Lock the dataset
         try await trainingDataSet.lockForMultiSampleUse()
@@ -1035,6 +1319,31 @@ public class Graph {
                 var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [:]
                 feedDict[inputFeedTensorInfo!.tensor] = try inputTensor.getMPSGraphTensorData(forGraph: self)
                 feedDict[expectedValueFeedTensorInfo!.tensor] = try outputTensor.getMPSGraphTensorData(forGraph: self)
+                
+                //  Add non-constant training parameters to the feed dictionary
+                if (!learningRateConstant) {
+                    let learningRateValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(learningRate))
+                    feedDict[learningRateTensor!] = try learningRateValueTensor.getMPSGraphTensorData(forGraph: self)
+                }
+                if (!β1Constant && β1Tensor != nil) {
+                    let β1ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β1))
+                    feedDict[β1Tensor!] = try β1ValueTensor.getMPSGraphTensorData(forGraph: self)
+                }
+                if (!β2Constant && β2Tensor != nil) {
+                    let β2ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β2))
+                    feedDict[β2Tensor!] = try β2ValueTensor.getMPSGraphTensorData(forGraph: self)
+                }
+                if (!ϵConstant && ϵTensor != nil) {
+                    let ϵValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(ϵ))
+                    feedDict[ϵTensor!] = try ϵValueTensor.getMPSGraphTensorData(forGraph: self)
+                }
+                
+                //  If there is a training/testing mode tensor, add it to the feed
+                if (trainingModeTensor != nil) {
+                    let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : 1)
+                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
+
+                }
 
                 //  Create the callback
                 let executionDesc = MPSGraphExecutionDescriptor()
@@ -1058,7 +1367,7 @@ public class Graph {
                 let _ = mpsgraph.encode(to: commandBuffer,
                                               feeds: feedDict,
                                               targetTensors: targets,
-                                              targetOperations: learningOps,
+                                              targetOperations: targetOperations,
                                               executionDescriptor: executionDesc)
                 commandBuffer.commit()
             }
@@ -1129,7 +1438,16 @@ public class Graph {
         if (!learningRateConstant) {
             feedDict[learningRateTensor!] = MPSGraphShapedType(shape: [1 as NSNumber], dataType: .float32)
         }
-        
+        if (!β1Constant && β1Tensor != nil) {
+            feedDict[β1Tensor!] = MPSGraphShapedType(shape: [1 as NSNumber], dataType: .float32)
+        }
+        if (!β2Constant && β2Tensor != nil) {
+            feedDict[β2Tensor!] = MPSGraphShapedType(shape: [1 as NSNumber], dataType: .float32)
+        }
+        if (!ϵConstant && ϵTensor != nil) {
+            feedDict[ϵTensor!] = MPSGraphShapedType(shape: [1 as NSNumber], dataType: .float32)
+        }
+
         //  Set up any learning operations
         var targetOperations : [MPSGraphOperation]? = nil
         if (learningModes.contains(mode)) {

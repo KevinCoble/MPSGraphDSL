@@ -171,6 +171,72 @@ extension Tensor {
         }
     }
     
+    /// Print out a 4-dimensional batch-row-column-channel) tensor as a string of values with specified width and precision, as a multiple rows of 2D matrixes
+    /// - Parameters:
+    ///   - elementWidth: The width each value will be.  Left-side spaces added as needed
+    ///   - precision: The precision (number of digits to the right of the decimal point
+    /// - Throws: `GenericMPSGraphDSLErrors.InvalidShape` if the Tensor is not 4-dimensional
+    public func print4D(elementWidth: Int, precision : Int) throws {
+        if (shape.dimensions.count != 4) { throw GenericMPSGraphDSLErrors.InvalidShape }
+        let batchSize = shape.dimensions[0]
+        let numRows = shape.dimensions[1]
+        let numCols = shape.dimensions[2]
+        let numMatrices = shape.dimensions[3]
+
+        for batch in 0..<batchSize {
+            var lines = Array(repeating: "", count: numRows)
+            var index = 0
+            for matrix in 0..<numMatrices {
+                var line : String = "["
+                for row in 0..<numRows {
+                    line += "["
+                    for col in 0..<numCols {
+                        index = batch*numRows*numCols*numMatrices + row*numCols*numMatrices + col*numMatrices + matrix
+                        let element = try getElement(index: index)
+                        let formattedNumber = String(format: "%\(elementWidth).\(precision)f", element)
+                        if (col > 0) { line += "," }
+                        line += formattedNumber
+                    }
+                    line += "]"
+                    if (row == (numRows-1)) {
+                        line += "]  "
+                    }
+                    else {
+                        line += "   "
+                    }
+                    lines[row] += line
+                    line = " "
+                }
+            }
+            
+            for row in 0..<numRows {
+                print(lines[row])
+            }
+            
+            if (batch < batchSize-1) { print("") }
+        }
+    }
+    
+    /// Print out a  tensor as a string of values with specified width and precision
+    /// - Parameters:
+    ///   - elementWidth: The width each value will be.  Left-side spaces added as needed
+    ///   - precision: The precision (number of digits to the right of the decimal point
+    /// - Throws: `GenericMPSGraphDSLErrors.InvalidShape` if the Tensor is not 4-dimensional
+    public func printTensor(elementWidth: Int, precision : Int) throws {
+        switch shape.dimensions.count {
+        case 1:
+            try print1D(elementWidth: elementWidth, precision: precision)
+        case 2:
+            try print2D(elementWidth: elementWidth, precision: precision)
+        case 3:
+            try print3D(elementWidth: elementWidth, precision: precision)
+        case 4:
+            try print4D(elementWidth: elementWidth, precision: precision)
+        default:
+            throw GenericMPSGraphDSLErrors.InvalidShape
+        }
+    }
+    
     /// Get a gaussian random value using the Box-Muller transform
     /// - Parameters:
     ///   - mean: mean value for the distribution
@@ -203,6 +269,8 @@ public final class CreateTensor {
             return TensorUInt8(shape: shape, initialValue: UInt8(initialValue))
         case .int32:
             return TensorInt32(shape: shape, initialValue: Int32(initialValue))
+        case .float16:
+            return TensorFloat16(shape: shape, initialValue: Float16(initialValue))
         case .float32:
             return TensorFloat32(shape: shape, initialValue: Float32(initialValue))
         case .double:
@@ -222,6 +290,8 @@ public final class CreateTensor {
             return TensorUInt8(shape: shape, randomValueRange: range)
         case .int32:
             return TensorInt32(shape: shape, randomValueRange: range)
+        case .float16:
+            return TensorFloat16(shape: shape, randomValueRange: range)
         case .float32:
             return TensorFloat32(shape: shape, randomValueRange: range)
         case .double:
@@ -241,6 +311,8 @@ public final class CreateTensor {
             return TensorUInt8(shape: shape, mean: mean, standardDeviation: standardDeviation)
         case .int32:
             return TensorInt32(shape: shape, mean: mean, standardDeviation: standardDeviation)
+        case .float16:
+            return TensorFloat16(shape: shape, mean: mean, standardDeviation: standardDeviation)
         case .float32:
             return TensorFloat32(shape: shape, mean: mean, standardDeviation: standardDeviation)
         case .double:
@@ -258,6 +330,8 @@ public final class CreateTensor {
                 return TensorUInt8(fromMPSTensorData: from)
             case .int32:
                 return TensorInt32(fromMPSTensorData: from)
+            case .float16:
+                return TensorFloat16(fromMPSTensorData: from)
             case .float32:
                 return TensorFloat32(fromMPSTensorData: from)
             case .double:
@@ -308,7 +382,7 @@ public final class CreateTensor {
     /// - Returns: A tensor of the specified type and size, initialized based in the initialization info given
     public static func createOrthogonalWeightInitializationTensor(type: DataType, shape: TensorShape, initializationInfo: WeightInitialization, numGates: Int) throws -> Tensor {
         //  Verify it is of an appropriate type
-        if (type != .float32) { throw MPSGraphNeuralNetErrors.OrthogonalizationOnNonFloatingTensor }
+        if (type != .float32 && type != .float16) { throw MPSGraphNeuralNetErrors.OrthogonalizationOnNonFloatingTensor }
         if (shape.numDimensions != 2) { throw MPSGraphNeuralNetErrors.InputTensorNotSquare2D }
         let numInputs = shape.dimensions[0]
 
@@ -338,9 +412,16 @@ public final class CreateTensor {
         }
         
         //  Convert to the required tensor type
-        let float32Elements : [Float32] = concatenatedElements.map { Float32($0) }
-        let tensor = try TensorFloat32(shape: shape, initialValues: float32Elements)
-        return tensor
+        if (type == .float16) {
+            let float16Elements : [Float16] = concatenatedElements.map { Float16($0) }
+            let tensor = try TensorFloat16(shape: shape, initialValues: float16Elements)
+            return tensor
+        }
+        else {
+            let float32Elements : [Float32] = concatenatedElements.map { Float32($0) }
+            let tensor = try TensorFloat32(shape: shape, initialValues: float32Elements)
+            return tensor
+        }
     }
     
     /// Create a tensor of the same type with the same values, but a different shape.  The new shape must have the same number of elements as the old shape
@@ -359,6 +440,9 @@ public final class CreateTensor {
         case .int32:
             let elements: [Int32] = (from as! TensorInt32).getElements()
             return try TensorInt32(shape: newShape, initialValues: elements)
+        case .float16:
+            let elements: [Float16] = (from as! TensorFloat16).getElements()
+            return try TensorFloat16(shape: newShape, initialValues: elements)
         case .float32:
             let elements: [Float32] = (from as! TensorFloat32).getElements()
             return try TensorFloat32(shape: newShape, initialValues: elements)
@@ -1091,6 +1175,388 @@ public struct TensorFloat32 : Tensor {
         let data: Data
         let elementCount = shape.totalSize
         data = Data(bytes: elements, count: elementCount * MemoryLayout<Float32>.size)
+        
+        return data
+    }
+}
+
+
+///  A Tensor with elements of type Float16
+public struct TensorFloat16 : Tensor {
+    ///  The shape of the Tensor
+    public let shape : TensorShape
+    var elements : [Float16]
+    
+    ///  The data type of the Tensor
+    public var type : DataType {
+        return .float16
+    }
+
+    ///  Construct a constant value tensor of a given type and shape
+    public init(shape : TensorShape, initialValue : Float16) {
+        self.shape = shape
+        let totalElements = shape.totalSize
+        
+        //  Create the array
+        elements = Array(repeating: initialValue, count: totalElements)
+    }
+
+    ///  Construct a value tensor of a given type and shape with the given data
+    ///
+    ///  This function assumes a single dimension input vector, sized to the total size of the TensorShape, mapping to the tensor using row-major format
+    public init(shape : TensorShape, initialValues : [Float16]) throws {
+        self.shape = shape
+        
+        if (shape.totalSize > initialValues.count) { throw GenericMPSGraphDSLErrors.NotEnoughValues }
+        
+        //  Create the array
+    
+        elements = []
+        for value in initialValues {
+            elements.append(value)
+        }
+     }
+
+    ///  Construct a value tensor of a given type and shape with the random data
+    public init(shape : TensorShape, randomValueRange: ParameterRange) {
+        self.shape = shape
+                
+        //  Create the array
+        let elementCount = shape.totalSize
+        elements = []
+        let doubleRange = randomValueRange.min.asDouble...randomValueRange.max.asDouble
+        for _ in 0..<elementCount {
+            elements.append(Float16(Double.random(in: doubleRange)))
+        }
+    }
+
+    ///  Construct a value tensor of a given type and shape with normal random data
+    public init(shape : TensorShape, mean: Double, standardDeviation: Double) {
+        self.shape = shape
+                
+        //  Create the array
+        let elementCount = shape.totalSize
+        elements = []
+        for _ in 0..<elementCount {
+            elements.append(Float16(TensorFloat32.getGaussianRandom(mean: mean, standardDeviation: standardDeviation)))
+        }
+    }
+
+    ///  Construct a Tensor from an MPSGraphTensorData object
+    public init(fromMPSTensorData tensorData: MPSGraphTensorData) {
+        self.shape = TensorShape(fromMPS: tensorData.shape)
+        
+        let NDArray = tensorData.mpsndarray()
+        let totalSize = shape.totalSize
+        
+            var values : [Float16] = Array(repeating: 0, count: totalSize)
+            NDArray.readBytes(&values, strideBytes: nil)
+            elements = values
+     }
+    
+    /// Create a MPSGraphTensorData object for the specified graph, using the data in the Tensor
+    /// - Parameter forGraph: The ``Graph`` object that the MPSGraphTensorData will be used with
+    /// - Returns: The create MPSGraphTensorData object
+    public func getMPSGraphTensorData(forGraph: Graph) throws -> MPSGraphTensorData {
+        let descriptor = MPSNDArrayDescriptor(dataType: DataType.float16.getMPSDataType(), shape: shape.getMPSShape())
+        let NDArray = MPSNDArray(device: forGraph.device, descriptor: descriptor)
+        var array = elements
+        NDArray.writeBytes(&array, strideBytes: nil)
+        return MPSGraphTensorData(NDArray)
+    }
+    
+    // MARK: - Getting elements
+
+    ///  Get a specified storage index element
+    ///
+    /// - Parameters:
+    ///   - index: The index into the tensor storage
+    ///
+    /// - Returns: the element at the specified storage index, as an Float32
+    ///
+    /// - Throws:
+    ///   - `GenericMPSGraphDSLErrors.InvalidIndex` if the index is outside if the  tensor storage array size
+    public func getElement(index : Int) throws -> Float16 {
+        if (index < 0 || index >= shape.totalSize) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        return elements[index]
+    }
+    
+    ///  Get a specified storage index element
+    ///
+    /// - Parameters:
+    ///   - index: The index into the tensor storage
+    ///
+    /// - Returns: the element at the specified storage index, as a Double
+    ///
+    /// - Throws:
+    ///   - `GenericMPSGraphDSLErrors.InvalidIndex` if the index is outside if the  tensor storage array size
+    public func getElement(index : Int) throws -> Double {
+        if (index < 0 || index >= shape.totalSize) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        return elements[index].asDouble
+    }
+    
+    ///  Get a specified tensor element by location, as a Float32
+    ///
+    /// - Parameters:
+    ///   - location: The location in the tensor, given as an array of offsets within each dimension of the tensor
+    ///
+    /// - Returns: the element at the specified location, as a Float32
+    ///
+    /// - Throws:
+    ///   - `GenericMPSGraphDSLErrors.InvalidShape` if the location does not match dimension size to the tensor shape, or any location is outside the shape dimensions
+    public func getElement(location: [Int]) throws -> Float16 {
+        //  Get the storage index from the location
+        let index = try shape.storageIndex(location: location)
+        if (index < 0 || index >= shape.totalSize) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        return elements[index]
+    }
+    
+    ///  Get a specified tensor element by location, as a Double
+    ///
+    /// - Parameters:
+    ///   - location: The location in the tensor, given as an array of offsets within each dimension of the tensor
+    ///
+    /// - Returns: the element at the specified location, as a Double
+    ///
+    /// - Throws:
+    ///   - `GenericMPSGraphDSLErrors.InvalidShape` if the location does not match dimension size to the tensor shape, or any location is outside the shape dimensions
+    public func getElement(location: [Int]) throws -> Double {
+        //  Get the storage index from the location
+        let index = try shape.storageIndex(location: location)
+        if (index < 0 || index >= shape.totalSize) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        return elements[index].asDouble
+    }
+    
+    ///  Get all the tensor elements as an array of the Tensor's type
+    ///
+    /// - Returns: the elements as an array of the type of the Tensor
+    public func getElements() -> [Float16] {
+        return elements
+    }
+
+    ///  Get all the tensor elements as a double array
+    ///
+    /// - Returns: the elements as a double array
+    public func getElements() -> [Double] {
+        var array: [Double] = []
+        for element in elements {
+            array.append(element.asDouble)
+        }
+        return array
+    }
+    
+    /// Get the classification value (index of highest element in Tensor)
+    /// - Returns: The classification value
+    public func getClassification() -> Int {
+        let dataSize = shape.totalSize
+        var argmax = 0
+        var maxValue = -Float16.greatestFiniteMagnitude
+        for i in 0..<dataSize {
+            if (elements[i] > maxValue) {
+                maxValue = elements[i]
+                argmax = i
+            }
+        }
+        
+        return argmax
+    }
+    
+    // MARK: - Setting elements
+
+    ///  Set a specified index element to the specified Float32 value
+    ///
+    /// - Parameters:
+    ///   - index: The index into the tensor storage
+    ///   - value: The new value to be stored at the the specified index
+    ///
+    /// - Throws:
+    ///   - `GenericMPSGraphDSLErrors.InvalidIndex` if the index is outside if the  tensor storage array size
+    ///   - `GenericMPSGraphDSLErrors.InvalidType` if the value type does not match the tensor type
+    public mutating func setElement(index : Int, value: Float16) throws {
+        if (index < 0 || index >= shape.totalSize) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        elements[index] = value
+    }
+
+    ///  Set a specified index element to the specified Double value
+    ///
+    /// - Parameters:
+    ///   - index: The index into the tensor storage
+    ///   - value: The new value to be stored at the the specified index
+    ///
+    /// - Throws:
+    ///   - `GenericMPSGraphDSLErrors.InvalidIndex` if the index is outside if the  tensor storage array size
+    public mutating func setElement(index : Int, value: Double) throws {
+        if (index < 0 || index >= shape.totalSize) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        elements[index] = Float16(value)
+    }
+    
+    /// Set a specified location of the Tensor to the specified Float32 value
+    /// - Parameters:
+    ///   - location: The location in the tensor, given as an array of locatons within each dimension of the tensor
+    ///   - value: value to store.  It will be cast to Float32
+    public mutating func setElement(location : [Int], value: Float16) throws {
+        //  Get the storage index from the location
+        let index = try shape.storageIndex(location: location)
+        if (index < 0 || index >= shape.totalSize) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        elements[index] = value
+    }
+    
+    /// Set a specified location of the Tensor to the specified Double value
+    /// - Parameters:
+    ///   - location: The location in the tensor, given as an array of locatons within each dimension of the tensor
+    ///   - value: value to store.  It will be cast to Float32
+    public mutating func setElement(location : [Int], value: Double) throws {
+        //  Get the storage index from the location
+        let index = try shape.storageIndex(location: location)
+        if (index < 0 || index >= shape.totalSize) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        elements[index] = Float16(value)
+    }
+
+    ///  Store a specified array of elements into the tensor, starting at a given location index
+    ///
+    /// - Parameters:
+    ///   - index: The starting index into the tensor storage.  The count of the values parameter determines the length of the store
+    ///   - values: The new value to be stored at the the specified index
+    ///
+    /// - Throws:
+    ///   - `GenericMPSGraphDSLErrors.InvalidIndex` if the index is outside if the  tensor storage array size
+    public mutating func setElements(startIndex :Int, values: [Double]) throws {
+        if (startIndex < 0 || (startIndex + values.count) > shape.totalSize) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        for i in 0..<values.count {
+            elements[startIndex + i] = Float16(values[i])
+        }
+    }
+
+    ///  Set the tensor values to all zeros, except the hot index, which gets set to 1
+       public mutating func setOneHot(hot: Int) throws {
+        //  Check the index
+        let totalElements = shape.totalSize
+        if (hot < 0 || hot >= totalElements) {
+            throw GenericMPSGraphDSLErrors.ClassificationValueOutOfRange
+        }
+
+        //  Set the one-hot
+        elements = Array(repeating: Float16(0), count: totalElements)
+        elements[hot] = Float16(1)
+    }
+
+    
+// MARK: - Batch functions
+
+    ///  Put a passed in tensor into the batch index provided
+    ///
+    /// - Parameters:
+    ///   - tensor: The sample tensor to be added to this batch tensor
+    ///   - batchIndex: The location within the batch that the sample goes into
+    ///
+    /// - Throws:
+    ///   - `MPSGraphRunErrors.NotABatchTensor` if this tensor does not have enough dimensions to be a batch tensor (minimum of 2)
+    ///   - `GenericMPSGraphDSLErrors.InvalidIndex` if the batch index is outside if the  tensor's first dimension (batch size)
+    ///   - `GenericMPSGraphDSLErrors.InvalidType` if the input tensor type does not match the batch tensor type
+    ///   - `MPSGraphRunErrors.SampleDoesntMatchBatchShape` if the input tensor type does not match the batch tensor shape minus the first (batch index) dimension
+    public mutating func setBatchSample(tensor: Tensor, batchIndex: Int) throws {
+        //  Verify the tensor is of the right type
+        if (tensor.type != .float32) { throw GenericMPSGraphDSLErrors.InvalidType }
+        
+        //  Verify the tensor matches our size, minus the batch index
+        let sampleShape = tensor.shape.dimensions
+        let ourShape = shape.dimensions
+        if (ourShape.count < 2) { throw MPSGraphRunErrors.NotABatchTensor }
+        var expectedShape = ourShape
+        expectedShape.removeFirst()
+        if (sampleShape != expectedShape) { throw MPSGraphRunErrors.SampleDoesntMatchBatchShape }
+       
+        //  Calculate a start index for the sample
+        if (batchIndex < 0 || batchIndex > ourShape[0]) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        let sampleSize = sampleShape.reduce(1, *)
+        let startIndex = batchIndex * sampleSize
+        
+        //  Move the data in
+        let tensorFloat16 = tensor as! TensorFloat16
+        for i in 0..<sampleSize {
+            elements[startIndex + i] = tensorFloat16.elements[i]
+        }
+    }
+    
+    ///  Retrieve the element values for a specified batch.  Assumes the tensor is a batch tensor (batch index as first dimension)
+    ///
+    /// - Parameters:
+    ///   - batchIndex: The location within the batch that the values come frin
+    ///
+    /// - Returns: the elements for the batch, as a Double array`
+    ///
+    /// - Throws:
+    ///   - `MPSGraphRunErrors.NotABatchTensor` if this tensor does not have enough dimensions to be a batch tensor (minimum of 2)
+    ///   - `GenericMPSGraphDSLErrors.InvalidIndex` if the batch index is outside if the  tensor's first dimension (batch size)
+    public func getValuesForBatch(_ batchIndex: Int) throws -> [Double] {
+        let ourShape = shape.dimensions
+        if (ourShape.count < 2) { throw MPSGraphRunErrors.NotABatchTensor }
+        if (batchIndex < 0 || batchIndex > ourShape[0]) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        var outputShape = ourShape
+        outputShape.removeFirst()
+        let dataSize = outputShape.reduce(1, *)
+        let startIndex = dataSize * batchIndex
+        var values: [Double] = []
+        for i in 0..<dataSize {
+            values.append(Double(elements[startIndex + i]))
+        }
+        return values
+    }
+
+    ///  Parses the element values s\for a specified batch, taking the argmax to find the classification value.  Assumes the tensor is a batch tensor (batch index as first dimension)
+    ///
+    /// - Parameters:
+    ///   - batchIndex: The location within the batch that the values come frin
+    ///
+    /// - Returns: the index of the highest value for the batch - the classification value`
+    ///
+    /// - Throws:
+    ///   - `MPSGraphRunErrors.NotABatchTensor` if this tensor does not have enough dimensions to be a batch tensor (minimum of 2)
+    ///   - `GenericMPSGraphDSLErrors.InvalidIndex` if the batch index is outside if the  tensor's first dimension (batch size)
+    public func getClassificationForBatch(_ batchIndex: Int) throws -> Int {
+        let ourShape = shape.dimensions
+        if (ourShape.count < 2) { throw MPSGraphRunErrors.NotABatchTensor }
+        if (batchIndex < 0 || batchIndex > ourShape[0]) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        var outputShape = ourShape
+        outputShape.removeFirst()
+        let dataSize = outputShape.reduce(1, *)
+        let startIndex = dataSize * batchIndex
+        var argmax = 0
+        var maxValue = -Float16.greatestFiniteMagnitude
+        for i in 0..<dataSize {
+            if (elements[startIndex + i]) > maxValue {
+                maxValue = elements[startIndex + i]
+                argmax = i
+            }
+        }
+        
+        return argmax
+    }
+    
+    /// Create a tensor from extracted batch data.
+    /// - Parameter batchIndex: The index within the batch (first) dimension to extract the data from
+    /// - Returns: A tensor of the size of this tensor minus the batch dimension, filled with the data for the specified batch index
+    public func getTensorForBatch(_ batchIndex: Int) throws -> Tensor {
+        if (shape.numDimensions < 2) { throw MPSGraphRunErrors.NotABatchTensor }
+        if (batchIndex < 0 || batchIndex > shape.dimensions[0]) { throw GenericMPSGraphDSLErrors.InvalidIndex }
+        let outputShape = shape.shapeWithRemovedBatchDimension()
+        let dataSize = outputShape.totalSize
+        let startIndex = dataSize * batchIndex
+        let batchValues = Array(elements[startIndex..<startIndex+dataSize])
+        let resultTensor = try TensorFloat16(shape: outputShape, initialValues: batchValues)
+        return resultTensor
+    }
+
+
+    // MARK: - Persistance functions
+
+    /// Get a Data object filled with the bytes from the Tensor
+    ///
+    ///  - Returns: the Data object with the bytes
+    public func getData() -> Data {
+        let data: Data
+        let elementCount = shape.totalSize
+        data = Data(bytes: elements, count: elementCount * MemoryLayout<Float16>.size)
         
         return data
     }

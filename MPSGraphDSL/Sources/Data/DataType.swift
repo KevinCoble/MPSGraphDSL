@@ -22,8 +22,9 @@ public enum DataType: Sendable {
     case int32
     //    case uInt64
     //    case int64
-    //    case float16
-    ///  Float
+    ///  Float16
+    case float16
+    ///  Float32
     case float32
     ///  Double
     case double
@@ -36,6 +37,8 @@ public enum DataType: Sendable {
             self = .uInt8
         case .int32:
             self = .int32
+        case .float16:
+            self = .float16
         case .float32:
             self = .float32
         default:
@@ -61,6 +64,8 @@ public enum DataType: Sendable {
             return (element is UInt8)
         case .int32:
             return (element is Int32)
+        case .float16:
+            return (element is Float16)
         case .float32:
             return (element is Float32)
         case .double:
@@ -75,6 +80,8 @@ public enum DataType: Sendable {
             return UInt8(0)
         case .int32:
             return Int32(0)
+        case .float16:
+            return Float16(0)
         case .float32:
             return Float32(0)
         case .double:
@@ -93,6 +100,8 @@ public enum DataType: Sendable {
             if (value < Int32.min) { return Int32.min }
             if (value > Int32.max) { return Int32.max }
             return Int32(value)
+        case .float16:
+            return Float16(value)
         case .float32:
             return Float(value)
         case .double:
@@ -111,6 +120,8 @@ public enum DataType: Sendable {
             if (value < Double(Int32.min)) { return Int32.min }
             if (value > Double(Int32.max)) { return Int32.max }
             return Int32(value)
+        case .float16:
+            return Float16(value)
         case .float32:
             return Float(value)
         case .double:
@@ -125,6 +136,8 @@ public enum DataType: Sendable {
             return UInt8.defaultRange
         case .int32:
             return Int32.defaultRange
+        case .float16:
+            return Float16.defaultRange
         case .float32:
             return Float.defaultRange
         case .double:
@@ -139,6 +152,8 @@ public enum DataType: Sendable {
             return .uInt8
         case .int32:
             return .int32
+        case .float16:
+            return .float16
         case .float32:
             return .float32
         default:
@@ -345,6 +360,82 @@ extension Int32 : DataElement {
     }
 }
 
+extension Float16 : DataElement {
+    public static var dataType : DataType { get { return .float16 }}
+    public var dataType : DataType { get { return .float16 }}
+
+    /// Get the default range of the data type
+    public static var defaultRange : ParameterRange {
+        get {
+            do {
+                return try ParameterRange(minimum: -Float16.greatestFiniteMagnitude, maximum: Float16.greatestFiniteMagnitude)
+            }
+            catch { fatalError() } //  Should never be reached}
+        }
+    }
+    
+    ///  Get the data type as an integer
+    public var asInteger : Int {
+        get {
+            if (self < Float16(Int.min)) { return Int.min }
+            if (self > Float16(Int.max)) { return Int.max }
+            return Int(self + 0.5)
+        }
+        set(newValue) {
+            self = Float16(newValue)
+        }
+    }
+
+    ///  Get the data type as a Double floating point value
+    public var asDouble : Double {
+        get { return Double(self) }
+        set(newValue) {
+            self = Float16(newValue)
+        }
+    }
+    
+    ///  Return the value of a Double as the type of this DataElement
+    public static func fromDouble(_ value: Double) -> DataElement {
+        return Float16(value)
+    }
+
+    ///  Gets or sets the value as a Float32
+    public var asFloat32 : Float32 {
+        get { return Float32(self) }
+        set(newValue) {
+            self = Float16(newValue)
+        }
+    }
+    
+    /// Convert the DataElement value to an unsigned byte.  If a range is passed in, that range is used to scale the value into the 0-255 value.  Otherwise the default positive scale of the DataElement type is used
+    /// - Parameter range: The range of the DataElement to scale to teh UInt8 range
+    /// - Returns: The DataElement value converted to a UInt8 value
+    public func asUnsignedByte(range: ParameterRange?) -> UInt8 {
+        var minimum: Double
+        var maximum: Double
+        if let scale = range {
+            minimum = scale.min.asDouble
+            maximum = scale.max.asDouble
+        }
+        else {
+            minimum = 0.0
+            maximum = Double(Float16.greatestFiniteMagnitude)
+        }
+        var fraction = (Double(self) - minimum) / (maximum - minimum)
+        if (fraction < 0.0) { fraction = 0.0 }
+        if (fraction > 1.0) { fraction = 1.0 }
+        fraction *= 255.0
+        return UInt8(fraction + 0.5)
+    }
+    
+    /// Get a random number of the DataElement type within a passed-in range
+    /// - Parameter range: the range for the random value
+    /// - Returns: a random value in the specified range
+    public static func getRandomNumberInRange(range: ParameterRange) -> DataElement {
+        let doubleRange = range.min.asDouble...range.max.asDouble
+        return Float(Double.random(in: doubleRange))
+    }
+}
 
 extension Float : DataElement {
     public static var dataType : DataType { get { return .float32 }}

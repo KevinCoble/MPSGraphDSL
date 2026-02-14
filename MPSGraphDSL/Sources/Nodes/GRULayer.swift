@@ -176,6 +176,8 @@ public class GRULayer: UnaryNode {
     var targetLast: Bool = true
 
     var lossNode: String? = nil
+    var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
+    var gradientClipping: (min: Double, max: Double)? = nil
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
@@ -255,7 +257,8 @@ public class GRULayer: UnaryNode {
         
         //  If this is a learning layer - add the recurrent weights to the list to get assignment operations for
         if let lossNode = lossNode {
-            graph.learningVariables.append((variable: node, tensor: rweightTensor, loss: lossNode))
+            let learningVariable = LearningVariable(variable: node, tensor: rweightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            graph.learningVariables.append(learningVariable)
         }
         
         //  Add the input weights variable
@@ -276,7 +279,8 @@ public class GRULayer: UnaryNode {
         
         //  If this is a learning layer - add the input weights to the list to get assignment operations for
         if let lossNode = lossNode {
-            graph.learningVariables.append((variable: node, tensor: iweightTensor, loss: lossNode))
+            let learningVariable = LearningVariable(variable: node, tensor: iweightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            graph.learningVariables.append(learningVariable)
         }
         
         //  Add the bias variable
@@ -297,7 +301,8 @@ public class GRULayer: UnaryNode {
         
         //  If this is a learning layer - add the bias to the list to get assignment operations for
         if let lossNode = lossNode {
-            graph.learningVariables.append((variable: node, tensor: biasTensor, loss: lossNode))
+            let learningVariable = LearningVariable(variable: node, tensor: biasTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            graph.learningVariables.append(learningVariable)
         }
         
         //  Create the descriptor
@@ -416,9 +421,16 @@ public class GRULayer: UnaryNode {
         return self
     }
     
-    ///  Modifier to set the LSTM layer to learn with respect to a loss calculation.  The z tensor will be output if this is used
-    public func learnWithRespectTo(_ lossNode: String) -> GRULayer {
+    /// Modifier to configure the layer's variables to learn
+    /// - Parameters:
+    ///   - mode: lossNode: the name of the loss calculation in the Graph
+    ///   - using: (Optional) the optimizer method to use for learning.  Defaults to stochastic gradient descent
+    ///   - gradientClipping: (Optional) defaults to nil.  A tuple with the minimum and maximum gradient values allowed in the back-propogation for this node.  The gradient is clipped to this range before being used by the optimizer
+    /// - Returns: The modified layer
+    public func learnWithRespectTo(_ lossNode: String, using: LearningOptimizer = .stochasticGradientDescent, gradientClipping: (min: Double, max: Double)? = nil) -> GRULayer {
         self.lossNode = lossNode
+        self.learningOptimizer = using
+        self.gradientClipping = gradientClipping
         return self
     }
 }

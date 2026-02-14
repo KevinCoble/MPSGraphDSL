@@ -10,6 +10,8 @@ There are two ways to create a ``Tensor`` - based on whether the data type (spec
 
 If at coding time you know what data type is needed, it is usually best to just create the Tensor using one of the classes that conform to the ``Tensor`` protocol that have fixed type.  These classes include:
 * ``TensorFloat32``
+* ``TensorFloat16``
+* ``TensorInt32``
 * ``TensorUInt8``
 * ``TensorDouble``
 
@@ -46,7 +48,8 @@ Once you have a data type and a shape, the only other thing you need to create a
 | -------------------- | ----------- |
 | Constant             | Each element has the same value that is passed to the initializer                                      |
 | Array                | Each element is assigned the value from an array that is passed to the initializer (see Storage above) |
-| Random               | Each element is assigned a random value from a range that is passed to the initializer                 |
+| Random Uniform       | Each element is assigned a uniform random value from a range that is passed to the initializer         |
+| Random Normal        | Each element is assigned a normal distribution random value from a mean and standard deviation that is passed to the initializer |
 | MPSGraphTensorData   | The elements are transfered from an MPSGraph result (usually done internally)                          |
 
 ## Creation Examples

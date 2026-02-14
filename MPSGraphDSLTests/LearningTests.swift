@@ -473,7 +473,6 @@ struct LearningTests {
                 if (result < 0.5 && expected < 0.5) { totalCorrect += 1 }
             }
             print("Final correct = \(totalCorrect)")
-            
         }
     }
     
@@ -502,6 +501,7 @@ struct LearningTests {
                 let sample = DataSample(inputs: inputTensor, outputs: outputTensor)
                 try await trainingDataSet.appendSample(sample)
             }
+            
             //  Build the graph
             let graph = Graph {
                 PlaceHolder(shape: [1, 2], name: "inputs")
@@ -559,6 +559,44 @@ struct LearningTests {
         }
     }
     
+    @Test func BatchNormalizationTest() async throws {
+        let inputTensor = try TensorFloat32(shape: TensorShape([4]), initialValues: [1.0, 2.0, 3.0, 4.0])
+        let outputTensor = try TensorFloat32(shape: TensorShape([4]), initialValues: [5.0, 1.0, 4.0, 4.0])
+        
+        //  Build the graph
+        let graph = Graph {
+            PlaceHolder(shape: [4], name: "inputs")
+            PlaceHolder(shape: [4], modes: ["learn"], name: "expectedValue")
+            BatchNormalization(input: "inputs", name: "result")
+                .learnWithRespectTo("loss")
+                .targetForModes(["infer"])
+            MeanSquaredErrorLoss(actual: "expectedValue", predicted: "result", name: "loss")
+                .targetForModes(["lossCalc", "learn"])
+            Learning(constant: true, learningRate: 0.05, learningModes: ["learn"])
+        }
+        
+        //  Get the initial output.  Should be the same as the input (initialization to ones and zeros)
+        var results = try graph.runOne(mode: "infer", inputTensors: ["inputs": inputTensor])
+        var result = results["result"]!
+        #expect(try abs(result.getElement(index: 0).asDouble - 1.0) < 1.0E-04)
+        #expect(try abs(result.getElement(index: 1).asDouble - 2.0) < 1.0E-04)
+        #expect(try abs(result.getElement(index: 2).asDouble - 3.0) < 1.0E-04)
+        #expect(try abs(result.getElement(index: 3).asDouble - 4.0) < 1.0E-04)
+
+        //  Train
+        for _ in 0..<250 {
+            _ = try graph.runOne(mode: "learn", inputTensors: ["inputs": inputTensor, "expectedValue": outputTensor])
+        }
+        
+        //  Get the post-training output.  Should match output
+        results = try graph.runOne(mode: "infer", inputTensors: ["inputs": inputTensor])
+        result = results["result"]!
+        #expect(try abs(result.getElement(index: 0).asDouble - 5.0) < 1.0E-02)
+        #expect(try abs(result.getElement(index: 1).asDouble - 1.0) < 1.0E-02)
+        #expect(try abs(result.getElement(index: 2).asDouble - 4.0) < 1.0E-02)
+        #expect(try abs(result.getElement(index: 3).asDouble - 4.0) < 1.0E-02)
+    }
+
     @Test func SpeedTest() async throws {
         //  Get a test data set
         let testDataSet = DataSet(inputShape: TensorShape([1, 2]), inputType: .float32, outputShape: TensorShape([3]), outputType: .float32)

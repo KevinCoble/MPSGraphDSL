@@ -40,6 +40,8 @@ The highest-level operations of MPSGraphDSL is creation of neural networks using
 
 For more information, see the Article <doc:NeuralNetworks>
 
+Please note:  It is beyond this document to describe in detail the operation of standard neural network layers.  That information is left for others to provide.  These documents just try to describe how to implement these standard building blocks using the MPSGraphDSL framework.
+
 ##  Where to Start
 
 Reading the five articles referenced above will definitely get you well on your way.  The next easiest way to start is probably with an example.  To this end the project contains a Swift Playground called **TutorialPlayground**.  There is also a command-line tool called **TensorOperations** that perform many of the Tensor modification operations so the results can be seen.  Looking at the source code for that tool can give you an idea of how to perform simple operations.  Lastly, you can look at the Test suite, as most of the tests perform either data parsing or graph calculations.

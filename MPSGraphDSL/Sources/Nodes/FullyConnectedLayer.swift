@@ -33,7 +33,11 @@ public class FullyConnectedLayer : UnaryNode {
     var useBias: Bool = true
     var weightInitialization: WeightInitialization
     var biasInitialValue: Double = 0.0
+    
     var lossNode: String? = nil
+    var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
+    var gradientClipping: (min: Double, max: Double)? = nil
+
     var suffixes: [String] = []
     var targetIndices: [Int] = []
     
@@ -50,7 +54,7 @@ public class FullyConnectedLayer : UnaryNode {
         switch (activationFunction) {
             case .none, .tanh, .sigmoid:
                 weightInitialization = .XavierGlorotNormal
-            case .relu, .leakyRelu, .leakyReluFromTensor:
+            case .relu, .leakyRelu, .leakyReluFromTensor, .gelu:
                 weightInitialization = .HeNormal
         }
         super.init(input: input, name: name)
@@ -132,7 +136,8 @@ public class FullyConnectedLayer : UnaryNode {
 
         //  If this is a learning layer - add the weights to the list to get assignment operations for
         if let lossNode = lossNode {
-            graph.learningVariables.append((variable: node, tensor: weightTensor, loss: lossNode))
+            let learningVariable = LearningVariable(variable: node, tensor: weightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            graph.learningVariables.append(learningVariable)
         }
         
         //  If using a bias term, add the bias variable
@@ -154,7 +159,8 @@ public class FullyConnectedLayer : UnaryNode {
 
             //  If this is a learning layer - add to the biases to the list to get assignment operations for
             if let lossNode = lossNode {
-                graph.learningVariables.append((variable: node, tensor: biasTensor!, loss: lossNode))
+                let learningVariable = LearningVariable(variable: node, tensor: biasTensor!, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+                graph.learningVariables.append(learningVariable)
             }
        }
         
@@ -258,10 +264,15 @@ public class FullyConnectedLayer : UnaryNode {
     }
     
     /// Modifier to configure the layer's variables to learn
-    /// - Parameter lossNode: the name of the loss calculation in the Graph
+    /// - Parameters:
+    ///   - mode: lossNode: the name of the loss calculation in the Graph
+    ///   - using: (Optional) the optimizer method to use for learning.  Defaults to stochastic gradient descent
+    ///   - gradientClipping: (Optional) defaults to nil.  A tuple with the minimum and maximum gradient values allowed in the back-propogation for this node.  The gradient is clipped to this range before being used by the optimizer
     /// - Returns: The modified layer
-    public func learnWithRespectTo(_ lossNode: String) -> FullyConnectedLayer {
+    public func learnWithRespectTo(_ lossNode: String, using: LearningOptimizer = .stochasticGradientDescent, gradientClipping: (min: Double, max: Double)? = nil) -> FullyConnectedLayer {
         self.lossNode = lossNode
+        self.learningOptimizer = using
+        self.gradientClipping = gradientClipping
         return self
     }
 }

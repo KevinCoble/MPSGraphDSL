@@ -212,7 +212,7 @@ This defines our Variable.  It gets it's shape and data type from the initializa
 
 **.learnWithRespectTo("loss")**
 
-This modifies the Variable to be updated when in a learning mode.  The update will be a function of the gradient from a future node named "loss", and the learning rate provided by a ``Learning`` node.
+This modifies the Variable to be updated when in a learning mode.  The update will be a function of the gradient from a future node named "loss", and the learning rate provided by a ``Learning`` node.  To keep things simple for this example the default optimizer, the standard stochastic gradient descent, is used.  The 'learnWithRespectTo' modifier has another optional paramater that can be used to change the default optimizer to several forms of the 'Adam' optimizer.  Additional nodes are added by the graph for momentum and velocity tensors, so more memory will be required by the GPU with these optimizers.
 
 **.targetForModes(["getVar"])**
 
@@ -240,13 +240,31 @@ The loss value must be a target for learning so that path to the loss node will 
 
 **Learning(constant: true, learningRate: 0.05, learningModes: ["learn"])**
 
-This is the special ``Learning`` node for MPSGraphDSL.  When it is present the Graph will create gradient nodes, stochastic learning nodes, and Variable assign operations for the specified mode.  All Variables that are to be learned must be modified with a 'learnWithRespectTo' modifier, and the loss term referenced be a target node for the mode.  The learning rate for the stochastic gradient descent is specified in this node as either a constant, or a variable.  If variable it will be set to the initial rate specified in this node but can be changed with any run or encode operation as training procedes.
+This is the special ``Learning`` node for MPSGraphDSL.  When it is present the Graph will create gradient nodes, stochastic learning nodes, and Variable assign operations for the specified mode.  All Variables that are to be learned must be modified with a 'learnWithRespectTo' modifier, and the loss term referenced be a target node for the mode.  The learning rate and other parameters for the optimizer (such as stochastic gradient descent or 'adam') is specified in this node as either a constant, or a variable.  If variable it will be set to the initial rate specified in this node but can be changed with any run or encode operation as training procedes.
 
 **}**
 
 End of the Graph definition.
 
-Discussion of how to use this graph is in a following section.
+Discussion of how to use this graph is in a later section.
+
+###  Optimizers
+
+The 'learnWithRespectTo' modifier for layers sets the learning modes for the learnable layer and the loss function it should learn against, but it also allows you to optionally set the optimization strategy for the layer.  It defaults to a standard stochastic gradient descent, but can be set to an 'adam' optimizer, with or without a maximum velocity value.
+
+The stochastic gradient descent updates the learnable parameters based on a fraction (the learning rate) of the current gradient of the parameter relative to the loss the function specified.  Only the learning rate parameter will be used for this option.
+
+The Adam optimizer also updates the learnable parameters based on a fraction of the current gradient of the parameter relative to the loss the function, but calculates running velocity and momentum terms for the changes, and uses these to avoid wide swings in updates.  This requires additional memory for the velocity and momentum terms.  Adam optimizers use the learning rate and β1, β2, and ϵ constants (see other documentation on adam optimizers for what these parameters do).
+
+The Adam optimizer with maximum velocity is similar to the vanilla Adam optimizer, but also calculates a maximum velocity term (additional memory), and uses that to keep any large velocity changes in check.
+
+###  Constant and Settable Learning Parameters
+
+The constants used by the learning optimizers, the learning rate, β1, β2, and ϵ constants, can either be constant or changable.  If constant they are put into the Graph as a constant tensor for using the supplied value from the ``Learning`` node.  If configured as settable they are put into the Graph as a placeholder, and set on each run operation called.  The initial value from the Learning node is stored in the Graph, but can be set from an optional parameter on any of the run functions available.  The last set value for each settable parameter is passed to the Graph along with the other input tensors for each run.  If you do not provide a new value for a run call, the last set value will be reused.
+
+###  Gradient Clipping
+
+Another option on the 'learnWithRespectTo' modifier for a learning node allows you to set an optional clipping range for the gradients for the parameters of that node.  It defaults to nil, but if set the gradients of the parameters for the node relative to the loss node will be clipped to the range provided before being passed to the optimizer being used for that node.
 
 ##  Batch Graphs
 
@@ -300,6 +318,8 @@ Encoding a "learn" operation where we don't need to see the results, but we want
 ```swift
 let _ = try graph.encodeOne(mode: "test", inputTensors: inputTensors, waitForResults: false, newLearningRate: 0.01)
 ```
+
+If instead of just stochastic gradient descent you are using an 'Adam' optimizer with variable parameters, those paramaters can be set in a similar manner as the learning rate.
 
 ###  Extracting Results
 

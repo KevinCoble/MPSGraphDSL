@@ -9,7 +9,7 @@ import Foundation
 import MetalPerformanceShaders
 import MetalPerformanceShadersGraph
 
-///   Node to perform the ReLU (rectified linear activation unit) activation function on thei input tensor
+///   Node to perform the ReLU (rectified linear activation unit) activation function on the input tensor
 public class ReLU : UnaryNode {
     ///  Constructor for a ReLU operation
     ///
@@ -32,7 +32,7 @@ public class ReLU : UnaryNode {
     }
 }
 
-///   Node to perform the leaky ReLU (rectified linear activation unit) activation function on thei input tensor
+///   Node to perform the leaky ReLU (rectified linear activation unit) activation function on the input tensor
 public class LeakyReLU : UnaryNode {
     let alpha: Double
     let alphaTensor: String?
@@ -88,9 +88,9 @@ public class LeakyReLU : UnaryNode {
     }
 }
 
-///   Node to perform the sigmoid activation function on thei input tensor
+///   Node to perform the sigmoid activation function on the input tensor
 public class Sigmoid : UnaryNode {
-    ///  Constructor for a ReLU operation
+    ///  Constructor for a Sigmoid operation
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
@@ -111,6 +111,44 @@ public class Sigmoid : UnaryNode {
     }
 }
 
+///   Node to perform the GELU activation function on the input tensor
+public class GELU : UnaryNode {
+    ///  Constructor for a GELU operation
+    ///
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - name: (Optional) The name for this node and its associated tensor
+    override public init(input: String? = nil, name: String? = nil) {
+        super.init(input: input, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+        
+        let GELUResult = GELU.addGELU(graph: graph, inputTensor: inputTensor)
+        
+        //  Remember the output tensor and shape for later
+        return [GELUResult]
+    }
+    
+    internal static func addGELU(graph: Graph, inputTensor: MPSGraphTensor) -> MPSGraphTensor {
+        let inputType = inputTensor.dataType
+        
+        //  Add to the graph itself
+        let twoTensor = graph.mpsgraph.constant(2.0, shape: [1 as NSNumber], dataType: inputType)
+        let sqrtTwoTensor = graph.mpsgraph.squareRoot(with: twoTensor, name: nil)
+        let xOverSqrtTwo = graph.mpsgraph.division(inputTensor, sqrtTwoTensor, name: nil)
+        let errorFunc = graph.mpsgraph.erf(with: xOverSqrtTwo, name: nil)
+        let oneTensor = graph.mpsgraph.constant(1.0, shape: [1 as NSNumber], dataType: inputType)
+        let errorFuncPlusOne = graph.mpsgraph.addition(oneTensor, errorFunc, name: nil)
+        let timesX = graph.mpsgraph.multiplication(inputTensor, errorFuncPlusOne, name: nil)
+        let GELUResult = graph.mpsgraph.division(timesX, twoTensor, name: nil)
+
+        return GELUResult
+    }
+}
+
 ///   Enumeration for selecting the activation function of a Neural Network layer
 public enum ActivationFunction {
     case none
@@ -119,7 +157,8 @@ public enum ActivationFunction {
     case sigmoid
     case leakyRelu(Double)
     case leakyReluFromTensor(String)
-    
+    case gelu
+
     func addActivation(graph: Graph, inputTensor: MPSGraphTensor, name: String?) throws -> MPSGraphTensor? {
         switch (self) {
             case .none:
@@ -144,6 +183,9 @@ public enum ActivationFunction {
                 else {
                     throw MPSGraphDSLErrors.NamedTensorNotFound(alphaName)
                 }
+            case .gelu:
+                let geluResult = GELU.addGELU(graph: graph, inputTensor: inputTensor)
+                return geluResult
         }
 
     }

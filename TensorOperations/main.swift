@@ -37,7 +37,7 @@ let quantize = false
 let pool = false
 let shapeOf = false
 let depthToSpace = false
-let gather = true
+let gather = false
 
 if matrixMultiplication {
     let MMvectorTensor = try TensorFloat32(shape: TensorShape([2]), initialValues: [7.0, 8.0])
