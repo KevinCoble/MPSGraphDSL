@@ -8,7 +8,7 @@
 import Foundation
 
 ///  Struct that defines the valid range for a parameter (a single dimension in an input tensor)
-public struct ParameterRange
+public struct ParameterRange: Sendable
 {
     let min : DataElement
     let max : DataElement

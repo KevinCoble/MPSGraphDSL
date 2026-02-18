@@ -729,5 +729,54 @@ struct DataParserTests {
 
         return true
     }
+    
+    @Test(.disabled("Requires a set of images in a fixed directory structure"))
+    func testImageParser() async throws {
+        
+        //  Create the file parser
+        let fileParser = ImageParser() {
+            ImageFile("ImageLoadTest/Cat/Black_cat_eyes.jpg", classificationIndex: 0)      //  Single image file
+        }
+        
+        //  Get the document directory URL
+        let documentsDirectoryUrl = URL.documentsDirectory
+        
+        //  Create the dataset
+        let rgbImageDataSet1 = DataSet(inputShape: TensorShape([64, 64, 3]), inputType: .float32, outputShape: TensorShape([10]), outputType: .float32)
+        
+        //  Parse the image
+        try await fileParser.parse(intoDataSet: rgbImageDataSet1, topLevelDirectory: documentsDirectoryUrl)
+        
+        //  Check it got there
+        #expect(await rgbImageDataSet1.numSamples == 1)
+        
+        //  Create the directory parser
+        let directoryParser = ImageParser() {
+            ImageDirectory("ImageLoadTest/Cat", classificationLabel: "cats")      //  Single image directory
+        }
+        
+        //  Create the dataset
+        let rgbImageDataSet2 = DataSet(inputShape: TensorShape([64, 64, 3]), inputType: .float32, outputShape: TensorShape([10]), outputType: .float32)
+
+        //  Parse the images
+        try await directoryParser.parse(intoDataSet: rgbImageDataSet2, topLevelDirectory: documentsDirectoryUrl)
+        
+        //  Check it got there
+        #expect(await rgbImageDataSet2.numSamples == 3)
+        
+        //  Create the top-level directory parser
+        let topLevelDirectoryParser = ImageParser() {
+            ImageDirectoryWithSubdirectories("ImageLoadTest")      //  Top-level image directory
+        }
+        
+        //  Create the dataset
+        let rgbImageDataSet3 = DataSet(inputShape: TensorShape([64, 64, 3]), inputType: .float32, outputShape: TensorShape([10]), outputType: .float32)
+
+        //  Parse the images
+        try await topLevelDirectoryParser.parse(intoDataSet: rgbImageDataSet3, topLevelDirectory: documentsDirectoryUrl)
+        
+        //  Check it got there
+        #expect(await rgbImageDataSet3.numSamples == 6)
+    }
 }
 

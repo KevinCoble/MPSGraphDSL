@@ -38,6 +38,7 @@ let pool = false
 let shapeOf = false
 let depthToSpace = false
 let gather = false
+let sliceUpdate = true
 
 if matrixMultiplication {
     let MMvectorTensor = try TensorFloat32(shape: TensorShape([2]), initialValues: [7.0, 8.0])
@@ -848,5 +849,43 @@ if (gather) {
     print("Gather operation along axis 0 (rows)")
     let results = try gatherGraph.runOne(mode: "gatherTest", inputTensors: [:])
     let result = results["result"]!
+    try result.print2D(elementWidth: 6, precision: 1)
+}
+
+if (sliceUpdate) {
+    let initialTensor = TensorFloat32(shape: TensorShape([5, 5]), initialValue: 0.0)
+    print("Initial tensor")
+    try initialTensor.print2D(elementWidth: 6, precision: 1)
+    let updateTensor = try TensorFloat32(shape: TensorShape([3, 3]), initialValues: [7.0, 2.0, 1.0, 9.0, 5.0, 6.0, 3.0, 8.0, 1.2])
+    //                                                                              [[   7.0,   2.0,   1.0]
+    //                                                                               [   9.0,   5.0,   6.0]
+    //                                                                               [   3.0,   8.0,   1.2]]
+    print("Update tensor")
+    try updateTensor.print2D(elementWidth: 6, precision: 1)
+    
+    let sliceUdateGraph = Graph {
+        Constant(values: initialTensor, name: "initialTensor")
+        Constant(values: updateTensor, name: "updateTensor")
+        SliceUpdateDataTensor(tensorToUpdate: "initialTensor", sourceTensor: "updateTensor", starts: [0, 0], ends: [5, 5], strides: [2, 2], name: "result")
+            .targetForModes(["sliceUpdateTest"])
+    }
+    
+    print("")
+    print("SliceUpdate operation starting at [0,0] going to [5, 5], with strides [2, 2]")
+    var results = try sliceUdateGraph.runOne(mode: "sliceUpdateTest", inputTensors: [:])
+    var result = results["result"]!
+    try result.print2D(elementWidth: 6, precision: 1)
+    
+    let sliceUdateGraph2 = Graph {
+        Constant(values: initialTensor, name: "initialTensor")
+        Constant(values: updateTensor, name: "updateTensor")
+        SliceUpdateDataTensor(tensorToUpdate: "initialTensor", sourceTensor: "updateTensor", starts: [1, 1], ends: [4, 4], strides: [1, 1], name: "result")
+            .targetForModes(["sliceUpdateTest"])
+    }
+
+    print("")
+    print("SliceUpdate operation starting at [1,1] going to [4, 4], with strides [1, 1]")
+    results = try sliceUdateGraph2.runOne(mode: "sliceUpdateTest", inputTensors: [:])
+    result = results["result"]!
     try result.print2D(elementWidth: 6, precision: 1)
 }

@@ -164,7 +164,7 @@ public enum DataType: Sendable {
 
 
 ///  Protocol for a single data item in a tensor
-public protocol DataElement
+public protocol DataElement : Sendable
 {
     ///  Gets the data type of the element
     static var dataType : DataType { get }

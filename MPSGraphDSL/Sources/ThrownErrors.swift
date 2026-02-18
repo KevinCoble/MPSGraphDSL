@@ -72,6 +72,16 @@ public enum DataParsingErrors : Error {
     case MoreUniqueLabelsThanOutputDimension
     ///   The parser tried to put a nil sample into the dataset.  Usually an internal error
     case AttemptToPutNilSampleInDataSet
+    ///   The parser tried to create a CGImageSource from the file URL and failed
+    case ImageSourceNotCreated
+    ///   The parser tried to load an image from the CGImageSource and failed
+    case ImageNotLoaded
+    ///   The node needs a classification method for parsing
+    case NeedClassificationIndexOrLabel
+    ///   The node has both label and index classification specifications
+    case ConflictingClassificationMethods
+    ///   The image parse node for a directory  does not point to a known directory
+    case NotDirectory
 }
 
 ///  Errors that can be thrown by the MPSGraph building system

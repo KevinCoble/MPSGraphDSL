@@ -2607,7 +2607,7 @@ public class Gather : BinaryNode {
     /// Constructor for a gather operation along all non-batch axes
     ///
     /// - Parameters:
-    ///   - updateTensor: (Optional) The name of the tensor that will provide the values to be gathered  If nil the previous node's output will be used
+    ///   - updateTensor: (Optional) The name of the tensor that will provide the values to be gathered.  If nil the previous node's output will be used
     ///   - indicesTensor: (Optional) The name of the tensor that will provide the indices for the gather operation.  Must be an Int32 or Int64 tensor.  If nil the previous node's output will be used
     ///   - numBatchDimensions: The number of batch dimensions.  MPSGraph documentation for 'gatherND' for tensor shape requirements using batch dimensions includes.
     ///   - name: (Optional) The name for this node and its associated tensor
@@ -2641,6 +2641,181 @@ public class Gather : BinaryNode {
             }
             else {
                 result = graph.mpsgraph.gatherAlongAxis(axis, updates: inputTensors.firstInputTensor, indices: inputTensors.secondInputTensor, name: graph.getFullName(name))
+            }
+        }
+        
+        //  Return the created MPSGraphTensor
+        return [result]
+    }
+}
+
+
+///   Node to update a tensor with slices from another tensor
+public class SliceUpdateDataTensor : BinaryNode {
+    let starts: [Int]
+    let ends: [Int]
+    let strides: [Int]
+    let haveMasks: Bool
+    let startMask: UInt32
+    let endMask: UInt32
+    let squeezeMask: UInt32
+    let useTensors: Bool
+    let startTensor: String?
+    let endTensor: String?
+    let strideTensor: String?
+
+    //  Create a strided-slice update operation with no masks from fixed constant arrays
+    /// - Parameters:
+    ///   - tensorToUpdate: (Optional) The input tensor that will be updated to create the output tensor.  If nil the previous node's output will be used
+    ///   - sourceTensor: (Optional) The data source for the slice that will be used to update the input tensor.  If nil the previous node's output will be used
+    ///   - starts: The array (one for each dimension of the input tensors) of the starting index in the input tensor for the update.
+    ///   - ends: The array (one for each dimension of the input tensors) of the ending index in the input tensor for the update.
+    ///   - strides: The array (one for each dimension of the input tensors) of the stride for the update.
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(tensorToUpdate: String? = nil, sourceTensor: String? = nil, starts: [Int], ends: [Int], strides: [Int], name: String? = nil) {
+        self.starts = starts
+        self.ends = ends
+        self.strides = strides
+        self.haveMasks = false
+        self.startMask = 0
+        self.endMask = 0
+        self.squeezeMask = 0
+        self.useTensors = false
+        self.startTensor = nil
+        self.endTensor = nil
+        self.strideTensor = nil
+        super.init(firstInput: tensorToUpdate, secondInput: sourceTensor, name: name)
+    }
+    
+    //  Create a strided-slice update operation with masks from fixed constant arrays
+    /// - Parameters:
+    ///   - tensorToUpdate: (Optional) The input tensor that will be updated to create the output tensor.  If nil the previous node's output will be used
+    ///   - sourceTensor: (Optional) The data source for the slice that will be used to update the input tensor.  If nil the previous node's output will be used
+    ///   - starts: The array (one for each dimension of the input tensors) of the starting index in the input tensor for the update.
+    ///   - ends: The array (one for each dimension of the input tensors) of the ending index in the input tensor for the update.
+    ///   - strides: The array (one for each dimension of the input tensors) of the stride for the update.
+    ///   - ignoreStartDims: The array of dimensions for which the start value should be ignored
+    ///   - ignoreEndDims: The array of dimensions for which the end value should be ignored
+    ///   - squeezeDimensions: The array of dimensions that will be squeezed out of the output tensor
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(tensorToUpdate: String? = nil, sourceTensor: String? = nil, starts: [Int], ends: [Int], strides: [Int], ignoreStartDims: [Int], ignoreEndDims: [Int], squeezeDimensions: [Int], name: String? = nil) {
+        self.starts = starts
+        self.ends = ends
+        self.strides = strides
+        self.haveMasks = false
+        var mask: UInt32 = 0
+        for dim in ignoreStartDims {
+            mask |= 1 << UInt32(dim)
+        }
+        self.startMask = mask
+        mask = 0
+        for dim in ignoreEndDims {
+            mask |= 1 << UInt32(dim)
+        }
+        self.endMask = mask
+        mask = 0
+        for dim in squeezeDimensions {
+            mask |= 1 << UInt32(dim)
+        }
+        self.squeezeMask = mask
+        self.useTensors = false
+        self.startTensor = nil
+        self.endTensor = nil
+        self.strideTensor = nil
+        super.init(firstInput: tensorToUpdate, secondInput: sourceTensor, name: name)
+    }
+
+    //  Create a strided-slice update operation with no masks from tensors
+    /// - Parameters:
+    ///   - tensorToUpdate: (Optional) The input tensor that will be updated to create the output tensor.  If nil the previous node's output will be used
+    ///   - sourceTensor: (Optional) The data source for the slice that will be used to update the input tensor.  If nil the previous node's output will be used
+    ///   - starts: The array (one for each dimension of the input tensors) of the starting index in the input tensor for the update.
+    ///   - ends: The array (one for each dimension of the input tensors) of the ending index in the input tensor for the update.
+    ///   - strides: The array (one for each dimension of the input tensors) of the stride for the update.
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(tensorToUpdate: String? = nil, sourceTensor: String? = nil, startTensor: String? = nil, endTensor: String? = nil, strideTensor: String? = nil, name: String? = nil) {
+        self.starts = []
+        self.ends = []
+        self.strides = []
+        self.haveMasks = false
+        self.startMask = 0
+        self.endMask = 0
+        self.squeezeMask = 0
+        self.useTensors = true
+        self.startTensor = startTensor
+        self.endTensor = endTensor
+        self.strideTensor = strideTensor
+        super.init(firstInput: tensorToUpdate, secondInput: sourceTensor, name: name)
+    }
+    
+    //  Create a strided-slice update operation with masks from tensors
+    /// - Parameters:
+    ///   - tensorToUpdate: (Optional) The input tensor that will be updated to create the output tensor.  If nil the previous node's output will be used
+    ///   - sourceTensor: (Optional) The data source for the slice that will be used to update the input tensor.  If nil the previous node's output will be used
+    ///   - starts: The array (one for each dimension of the input tensors) of the starting index in the input tensor for the update.
+    ///   - ends: The array (one for each dimension of the input tensors) of the ending index in the input tensor for the update.
+    ///   - strides: The array (one for each dimension of the input tensors) of the stride for the update.
+    ///   - ignoreStartDims: The array of dimensions for which the start value should be ignored
+    ///   - ignoreEndDims: The array of dimensions for which the end value should be ignored
+    ///   - squeezeDimensions: The array of dimensions that will be squeezed out of the output tensor
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(tensorToUpdate: String? = nil, sourceTensor: String? = nil, startTensor: String? = nil, endTensor: String? = nil, strideTensor: String? = nil, ignoreStartDims: [Int], ignoreEndDims: [Int], squeezeDimensions: [Int], name: String? = nil) {
+        self.starts = []
+        self.ends = []
+        self.strides = []
+        self.haveMasks = false
+        var mask: UInt32 = 0
+        for dim in ignoreStartDims {
+            mask |= 1 << UInt32(dim)
+        }
+        self.startMask = mask
+        mask = 0
+        for dim in ignoreEndDims {
+            mask |= 1 << UInt32(dim)
+        }
+        self.endMask = mask
+        mask = 0
+        for dim in squeezeDimensions {
+            mask |= 1 << UInt32(dim)
+        }
+        self.squeezeMask = mask
+        self.useTensors = true
+        self.startTensor = startTensor
+        self.endTensor = endTensor
+        self.strideTensor = strideTensor
+        super.init(firstInput: tensorToUpdate, secondInput: sourceTensor, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensors
+        let inputTensors = try graph.getBinaryTensors(firstInputName, secondInputName)
+        
+        //  Add to the graph itself
+        let result: MPSGraphTensor
+        if (useTensors) {
+            let startMPSTensor = try graph.getOptionalTensor(startTensor)
+            let endMPSTensor = try graph.getOptionalTensor(endTensor)
+            let strideMPSTensor = try graph.getOptionalTensor(strideTensor)
+            if (haveMasks) {
+                result = graph.mpsgraph.sliceUpdateDataTensor(inputTensors.firstInputTensor, update: inputTensors.secondInputTensor,
+                                                              startsTensor: startMPSTensor, endsTensor: endMPSTensor, stridesTensor: strideMPSTensor,
+                                                              startMask: startMask, endMask: endMask, squeezeMask: squeezeMask, name: graph.getFullName(name))
+            }
+            else {
+                result = graph.mpsgraph.sliceUpdateDataTensor(inputTensors.firstInputTensor, update: inputTensors.secondInputTensor,
+                                                              startsTensor: startMPSTensor, endsTensor: endMPSTensor, stridesTensor: strideMPSTensor,
+                                                              name: graph.getFullName(name))
+            }
+        }
+        else {
+            if (haveMasks) {
+                result = graph.mpsgraph.sliceUpdateDataTensor(inputTensors.firstInputTensor, update: inputTensors.secondInputTensor,
+                                                              starts: starts.map{NSNumber(value: $0)}, ends: ends.map{NSNumber(value: $0)}, strides: strides.map{NSNumber(value: $0)},
+                                                              startMask: startMask, endMask: endMask, squeezeMask: squeezeMask, name: graph.getFullName(name))
+            }
+            else {
+                result = graph.mpsgraph.sliceUpdateDataTensor(inputTensors.firstInputTensor, update: inputTensors.secondInputTensor,
+                                                              starts: starts.map{NSNumber(value: $0)}, ends: ends.map{NSNumber(value: $0)}, strides: strides.map{NSNumber(value: $0)}, name: graph.getFullName(name))
             }
         }
         

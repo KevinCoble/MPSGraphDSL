@@ -4,7 +4,7 @@ This article describes how to create and use data parsers to extract the informa
 
 ## Overview
 
-There are three types of data parsers available in the MPSGraphDSL library:  Binary, Fixed Column Text, and Delineated Text parsers.  We will start with Delineated Text parsers
+There are four types of data parsers available in the MPSGraphDSL library:  Binary, Fixed Column Text, Delineated Text, and Image parsers.  We will start with Delineated Text parsers
 
 ## Delineated Text Parsers
 
@@ -371,3 +371,64 @@ The following classes can be used in a DataParser construction:
 | ``StartNewSample``       | This ends the current sample, creates a new one, and resets the storage locations for the sample                         |
 | ``IncrementDimension``   | This increments a specified storage location dimension for input and/or output tensors                                   |
 
+
+## Image Parsers
+
+Image parsers are used to parse tensors from image files for classification data sets.
+
+Greyscale images are converted into two-dimensional tensors.  Color (RGB) images are converted into three-dimensional tensors, with the last dimension (channel) being sized to three for the red, green, and blue channels.
+
+When parsing single files or individual directories, the output tensor can be set to the classification index or label given in the parser chunk.  When parsing a top-level directory with multiple sub-directories of images, the the output tensor for each image is set to a classification label based on the name of the subdirectory that the image file was under.
+
+With concurrency, there is no guarantee of the order of samples added to the dataset, as load times, resizing operations, etc. can occur at different speeds for each file.
+
+An example with each of the different chunk types follows:
+
+```swift
+let imageParser = ImageParser() {
+    ImageFile("ImageLoadTest/Cat/Black_cat_eyes.jpg", classificationIndex: 0)   //  Single image file
+    ImageDirectory("ImageLoadTest/Cat", classificationLabel: "cats")            //  Single image directory
+    ImageDirectoryWithSubdirectories("ImageLoadTest")                           //  Top-level image directory
+}
+
+//  Create the dataset
+let rgbImageDataSet = DataSet(inputShape: TensorShape([64, 64, 3]), inputType: .float32, outputShape: TensorShape([10]), outputType: .float32)
+
+//  Parse the images
+try await imageParser.parse(intoDataSet: rgbImageDataSet, topLevelDirectory: documentsDirectoryUrl)
+```
+
+Let's go through each line:
+
+**let imageParser = ImageParser() {**
+
+Create an image parser
+
+**ImageFile("ImageLoadTest/Cat/Black_cat_eyes.jpg", classificationIndex: 0)**
+
+Parse a single image file.  The file is in the directory "ImageLoadTest/Cat" - relative to the top directory given in the parsing command seen later.  The image file name is "Black_cat_eyes.jpg".  The image will be resized to the dimensions given by the input tensor size of the dataset it is being parsed into.  The output tensor for the sample will be set to a classification index of 0.
+
+**ImageDirectory("ImageLoadTest/Cat", classificationLabel: "cats")**
+
+Parse all files in the directory "ImageLoadTest/Cat" - relative to the top directory given in the parsing command seen later.  A sample will be created for each file found in the directory.  The output tensors for each sample will be set to the index for the classification label "cats", which will be added to the dataset if needed.
+
+**ImageDirectoryWithSubdirectories("ImageLoadTest")**
+
+Parse all sub-directories under the directory "ImageLoadTest" - relative to the top directory given in the parsing command seen later.  Each sub-directory will be parsed for image files, which will be converted into images and made into samples.  The output tensor for each sample will be set to the index for the classification label based on the name of the sub-directory they are in, which will be added to the dataset if needed.
+
+**let rgbImageDataSet = DataSet(inputShape: TensorShape([64, 64, 3]), inputType: .float32, outputShape: TensorShape([10]), outputType: .float32)**
+
+Create the ``DataSet`` that the images will be parsed into.  The input tensor shape must be 2-dimensional for greyscale images, three-dimensional with the last dimension set to 3 for color images.  The parsed images will be resized to the height and width from the first two dimensions of the input tensor shape - 64x64 in this case.
+
+**try await imageParser.parse(intoDataSet: rgbImageDataSet, topLevelDirectory: documentsDirectoryUrl)**
+
+Parse all the images into the data set.  The filenames and directories specified in the definition image chunks will all be relative to the URL given in the "topLevelDirectory" parameter of the parse command - in this case the current Documents directory (code for getting the Documents directory URL is not shown)
+
+###  ImageChunks Used by Image DataParsers
+
+The following classes can be used in an ImageParser construction:
+| DataChunk                | Description                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| ``ImageFile``            | The specified image file is read and converted to an input tensor with the output set to the specified classification label or index  |
+| ``ImageDirectory``       | A specified directory is read for all image files which are converted to an input tensor with the output set to the specified classification label or index  |
+| ``ImageDirectoryWithSubdirectories``  | A specified directory is read for all sub-directories, which are read for all image files which are converted to an input tensor with the output set to the classification label from the sub-directory name |
