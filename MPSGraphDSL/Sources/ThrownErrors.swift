@@ -88,7 +88,7 @@ public enum DataParsingErrors : Error {
 public enum MPSGraphDSLErrors : Error {
     ///  The named tensor was not found
     case NamedTensorNotFound(String)
-    ///  The shapes of the two inputs to a standard binary node (add, multiply, etc.) did not match
+    ///  A nil was passed for a tensor name, but there was no previous node to reference
     case NoPreviousNode
     ///   The shapes of a binary operation do not match
     case BinaryShapesDontMatch(String, String)

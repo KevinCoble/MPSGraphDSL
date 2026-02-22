@@ -46,7 +46,7 @@ Let's start by creating a simple graph - one that takes an input TensorFloat32 w
 
 ```swift
 let graph = Graph {
-    PlaceHolder(shape: [3, 4], name: "inputs")
+    PlaceHolder(shape: [3, 4], type: .float32, name: "inputs")
     Constant(shape: [3, 4], value: Float32(2.0), name: "constant")
     Multiplication(firstInput: "inputs", secondInput: "constant", name: "multiplicationResult")
         .targetForModes(["runGraph"])
@@ -59,9 +59,9 @@ Let's walk through each line of that code and explain what is going on:
 
 Create a ``Graph`` object and set up the declarative construction with a set of nodes inbetween the braces
 
-**PlaceHolder(shape: [3, 4], name: "inputs")**
+**PlaceHolder(shape: [3, 4], type: .float32, name: "inputs")**
 
-This ``PlaceHolder`` is the stand-in for the input.  When this Graph is run a Tensor of the specified shape (3 rows of 4 columns) must be provided for the inputs with key 'inputs' (the name of the PlaceHolder).  Note the data type was not specified in the PlaceHolder.  Most nodes can take any type of data and will adapt base on what they are passed - but you must be consistent with types being passed into operations to maintain data integrity.
+This ``PlaceHolder`` is the stand-in for the input.  When this Graph is run a Tensor of the specified shape (3 rows of 4 columns) and type (Float32) must be provided for the inputs with key 'inputs' (the name of the PlaceHolder).  Note the data type was not specified in the PlaceHolder.  Most nodes can take any type of data and will adapt base on what they are passed - but you must be consistent with types being passed into operations to maintain data integrity.
 
 **Constant(shape: [3, 4], value: Float32(2.0), name: "constant")**
 
@@ -101,7 +101,7 @@ It is common for the output of a node to immediately be used by the next node in
 
 ```swift
 let graph = Graph {
-    PlaceHolder(shape: [3, 4], name: "inputs")
+    PlaceHolder(shape: [3, 4], type: .float32, name: "inputs")
     Constant(shape: [3, 4], value: Float32(2.0))
     Multiplication(firstInput: "inputs", name: "multiplicationResult")
         .targetForModes(["runGraph"])
@@ -112,7 +112,7 @@ The Constant node no longer has a name, and the Multiplication node only referen
 
 ```swift
 let graph = Graph {
-    PlaceHolder(shape: [3, 4], name: "inputs")
+    PlaceHolder(shape: [3, 4], type: .float32, name: "inputs")
     Constant(shape: [3, 4], value: Float32(2.0))
     SquareRoot()
     Multiplication(firstInput: "inputs", name: "multiplicationResult")
@@ -179,13 +179,13 @@ The example we will use is quite simple.  Assume you have a set of two numbers, 
 ```swift
 let multiplicand = TensorFloat32(shape: TensorShape([1]), initialValue: Float32(2.0))
 let graph = Graph {
-    PlaceHolder(shape: [1], name: "input")
+    PlaceHolder(shape: [1], type: .float32, name: "input")
     Variable(values: multiplicand, name: "variable")
         .learnWithRespectTo("loss")
         .targetForModes(["getVar"])
     Multiplication(firstInput: "input", secondInput: "variable", name: "result")
         .targetForModes(["test"])
-    PlaceHolder(shape: [1], modes: ["lossCalc", "learn"], name: "expectedValue")
+    PlaceHolder(shape: [1], type: .float32, modes: ["lossCalc", "learn"], name: "expectedValue")
     MeanSquaredErrorLoss(actual: "expectedValue", predicted: "result", name: "loss")
         .targetForModes(["lossCalc", "learn"])
     Learning(constant: true, learningRate: 0.05, learningModes: ["learn"])
@@ -202,9 +202,9 @@ A Variable node requires an initial value to be specified.  It can come from ano
 
 Create the graph for both testing and learning modes
 
-**PlaceHolder(shape: [1], name: "input")**
+**PlaceHolder(shape: [1], type: .float32, name: "input")**
 
-Our input is a single value.  It will be passed to the graph using a feed dictionary key of "input"
+Our input is a single Float32 value.  It will be passed to the graph using a feed dictionary key of "input"
 
 **"Variable(values: multiplicand, name: "variable")**
 
@@ -226,7 +226,7 @@ This node multiplies the input by the variable.
 
 This modifies the Multiplication node to be an output when the Graph is run with mode "test".  The predicted output value will be return in the results dictionary with a key of "result".  Nodes identified as targets must be named so the run results can be found amongst any other result targets for the mode.
 
-**PlaceHolder(shape: [1], modes: ["lossCalc", "learn"], name: "expectedValue")**
+**PlaceHolder(shape: [1], type: .float32, modes: ["lossCalc", "learn"], name: "expectedValue")**
 
 This Placeholder provides the expected value for the loss function.  It is not needed for "test" mode where we are just getting the results of the multiplication, or "getVar" mode where we are just reading the value of the Variable.  Therefore the PlaceHolder is marked to only be required when the mode is "learn"
 
@@ -274,7 +274,7 @@ To try to make this process easy, Graphs can be built in 'batch' mode.  When a b
 
 ```swift
 graph = Graph(batchSize: 16) {
-    PlaceHolder(shape: [28, 28], name: "input")
+    PlaceHolder(shape: [28, 28], type: .float32, name: "input")
     .
     .
     .
@@ -283,7 +283,7 @@ graph = Graph(batchSize: 16) {
 }
 ```
 
-The PlaceHolder takes an 28x28 input image.  When the Graph is used a 16x28x28 Tensor will be passed to the Graph, with 16 samples (of shape \[28, 28\]) concatenated together to make the batch.  Any result Tensors may have a batch dimension as well, so check rather than assume.  Testing and Training functions on the Graph will automatically take care of the batch dimension.
+The PlaceHolder takes an 28x28 Float32 input image.  When the Graph is used a 16x28x28 Tensor will be passed to the Graph, with 16 samples (of shape \[28, 28\]) concatenated together to make the batch.  Any result Tensors may have a batch dimension as well, so check rather than assume.  Testing and Training functions on the Graph will automatically take care of the batch dimension.
 
 Many neural network nodes like FullyConnectedLayer, ConvolutionLayer, etc. deal with batch dimension tensors by running each batch sample through the operations with weight/bias variables that are not expanded for the batch size.  This means you can create a Graph to train/test with the speed inprovement of batch processing, but put the same weights and biases into a future Graph (with the same structure of nodes) that does not require batch inputs for user inference runs.
 
@@ -379,7 +379,7 @@ You can then provide this mapping in a ``SubGraph`` node which takes the definit
 ```swift
 let subgraphMap : [String : String?] = ["subInput" : "input"]       //  Map "input" node of graph to "subInput" placeholder of subgraph
 let graph = Graph {
-    PlaceHolder(shape: [2], name: "input")
+    PlaceHolder(shape: [2], type: .float32, name: "input")
     SubGraph(definition: subGraph, name: "subgraph", inputMap: subgraphMap)
     Negative(name: "result")
         .targetForModes(["runTest"])

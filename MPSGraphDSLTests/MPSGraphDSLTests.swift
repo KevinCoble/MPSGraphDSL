@@ -15,7 +15,7 @@ struct MPSGraphDSLTests {
     @Test func basicGraphBuilderTest() async throws {
         do {
             let graph = Graph {
-                PlaceHolder(shape: [2], name: "input")
+                PlaceHolder(shape: [2], type: .float32, name: "input")
                 Negative(name: "result")
                     .targetForModes(["runTest"])
             }
@@ -37,7 +37,7 @@ struct MPSGraphDSLTests {
     @Test func namedNodeGraphBuilderTest() async throws {
         do {
             let graph = Graph {
-                PlaceHolder(shape: [2], name: "input")
+                PlaceHolder(shape: [2], type: .float32, name: "input")
                 Negative(input: "input", name: "result")
                     .targetForModes(["runTest"])
             }
@@ -60,7 +60,7 @@ struct MPSGraphDSLTests {
         do {
             let constantTensor = try TensorFloat32(shape: TensorShape([2]), initialValues: [-1.0, 3.0])
             let graph = Graph {
-                PlaceHolder(shape: [2], name: "input")
+                PlaceHolder(shape: [2], type: .float32, name: "input")
                 Constant(values: constantTensor, name: "constant")
                 Addition(firstInput: "input", secondInput: "constant", name: "result")
                     .targetForModes(["runTest"])
@@ -91,7 +91,7 @@ struct MPSGraphDSLTests {
             
             let subgraphMap : [String : String?] = ["subInput" : "input"]       //  Map "input" node of graph to "subInput" placeholder of subgraph
             let graph = Graph {
-                PlaceHolder(shape: [2], name: "input")
+                PlaceHolder(shape: [2], type: .float32, name: "input")
                 SubGraph(definition: subGraph, name: "subgraph", inputMap: subgraphMap)
             }
             
@@ -121,7 +121,7 @@ struct MPSGraphDSLTests {
             let subgraphMap : [String : String?] = ["subInput" : "input"]       //  Map "input" node of graph to "subInput" placeholder of subgraph
             let dataTensorMap : [String : Tensor] = ["data" : dataTensor]       //  Map the data tensor with reference string "data"
             let graph = Graph {
-                PlaceHolder(shape: [2], name: "input")
+                PlaceHolder(shape: [2], type: .float32, name: "input")
                 SubGraph(definition: subGraph, name: "subgraph", inputMap: subgraphMap, dataTensorMap: dataTensorMap)
             }
             
@@ -142,7 +142,7 @@ struct MPSGraphDSLTests {
     @Test func targetTensorsTest() async throws {
         do {
             let graph = Graph {
-                PlaceHolder(shape: [2], name: "input")
+                PlaceHolder(shape: [2], type: .float32, name: "input")
                 Square(name: "setTarget")
                     .targetForModes(["runTest"])
                 SquareRoot()

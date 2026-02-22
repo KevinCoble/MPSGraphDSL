@@ -38,7 +38,8 @@ let pool = false
 let shapeOf = false
 let depthToSpace = false
 let gather = false
-let sliceUpdate = true
+let sliceUpdate = false
+let select = true
 
 if matrixMultiplication {
     let MMvectorTensor = try TensorFloat32(shape: TensorShape([2]), initialValues: [7.0, 8.0])
@@ -888,4 +889,31 @@ if (sliceUpdate) {
     results = try sliceUdateGraph2.runOne(mode: "sliceUpdateTest", inputTensors: [:])
     result = results["result"]!
     try result.print2D(elementWidth: 6, precision: 1)
+}
+
+if (select) {
+    let predicateTensor = try TensorInt32(shape: TensorShape([6]), initialValues: [0, 1, 0, 1, 1, 0])
+    print("Predicate tensor")
+    try predicateTensor.print1D(elementWidth: 6, precision: 0)
+    let trueTensor = try TensorFloat32(shape: TensorShape([6]), initialValues: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    print("True tensor")
+    try trueTensor.print1D(elementWidth: 6, precision: 1)
+    let falseTensor = try TensorFloat32(shape: TensorShape([6]), initialValues: [-1.2, -2.2, -3.2, -4.2, -5.2, -6.2])
+    print("False tensor")
+    try falseTensor.print1D(elementWidth: 6, precision: 1)
+
+    let selectUdateGraph = Graph {
+        Constant(values: predicateTensor, name: "predicate")
+        Constant(values: trueTensor, name: "true")
+        Constant(values: falseTensor, name: "false")
+        Select(predicateTensor: "predicate", trueTensor: "true", falseTensor: "false", name: "result")
+            .targetForModes(["selectTest"])
+    }
+
+    print("")
+    print("Select operation")
+    let results = try selectUdateGraph.runOne(mode: "selectTest", inputTensors: [:])
+    let result = results["result"]!
+    try result.print1D(elementWidth: 6, precision: 1)
+
 }

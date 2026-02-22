@@ -31,11 +31,11 @@ struct RNNTests {
             
             //  Create the graph
             let graph = Graph {
-                PlaceHolder(shape: [2, 1, 1], name: "input")
+                PlaceHolder(shape: [2, 1, 1], type: .float32, name: "input")
                 RNNLayer(input: "input", stateSize: 1, name: "RNN")
                     .learnWithRespectTo("loss")
                     .targetForModes(["infer"])
-                PlaceHolder(shape: [1], modes: ["learn"], name: "expectedValue")
+                PlaceHolder(shape: [1], type: .float32, modes: ["learn"], name: "expectedValue")
                 MeanSquaredErrorLoss(actual: "expectedValue", predicted: "RNN_lastState", name: "loss")
                     .targetForModes(["lossCalc", "learn"])
                 Learning(constant: true, learningRate: 0.05, learningModes: ["learn"])
@@ -100,14 +100,14 @@ struct RNNTests {
             
             //  Create the graph
             let graph = Graph {
-                PlaceHolder(shape: [3, 1, 1], name: "input")
+                PlaceHolder(shape: [3, 1, 1], type: .float32, name: "input")
                 LSTMLayer(input: "input", stateSize: 20, name: "LSTM")
                     .allActivationFunctions(.relu)
                     .learnWithRespectTo("loss")
                 FullyConnectedLayer(input: "LSTM_lastState", outputShape: TensorShape([1]), activationFunction: .none, name: "result")
                     .learnWithRespectTo("loss")
                     .targetForModes(["infer"])
-                PlaceHolder(shape: [1], modes: ["learn"], name: "expectedValue")
+                PlaceHolder(shape: [1], type: .float32, modes: ["learn"], name: "expectedValue")
                 MeanSquaredErrorLoss(actual: "expectedValue", predicted: "result", name: "loss")
                     .targetForModes(["lossCalc", "learn"])
                 Learning(constant: true, learningRate: 0.1, learningModes: ["learn"])
@@ -171,11 +171,11 @@ struct RNNTests {
             
             //  Create the graph
             let graph = Graph {
-                PlaceHolder(shape: [3, 1, 1], name: "input")
+                PlaceHolder(shape: [3, 1, 1], type: .float32, name: "input")
                 GRULayer(input: "input", stateSize: 1, name: "GRU")
                     .learnWithRespectTo("loss")
                     .targetForModes(["infer"])
-                PlaceHolder(shape: [1], modes: ["learn"], name: "expectedValue")
+                PlaceHolder(shape: [1], type: .float32, modes: ["learn"], name: "expectedValue")
                 MeanSquaredErrorLoss(actual: "expectedValue", predicted: "GRU_lastState", name: "loss")
                     .targetForModes(["lossCalc", "learn"])
                 Learning(constant: true, learningRate: 0.05, learningModes: ["learn"])

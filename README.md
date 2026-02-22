@@ -29,6 +29,14 @@ This top level of the repository gets you the XCode project with the library, do
 
 One level down, into MPSGraphDSL, you can reference the swift package if that is all you need.
 
+##  Versions
+
+The version number is in the GIT tags
+
+Version 1.0 is where the framework was able to support all the basics and the neural network for the MNIST_DSL project - a rewrite of Apple's sample code using SwiftUI, swift 6, and of course - MPSGraphDSL.  This code uses convolution and fully-connected neural network layers.
+
+Current work on the framework is for filling in some of the gaps, and getting transformer models going.
+
 ##  Use Notes
 ### Known Issues
 The GRU node cannot be trained (ran through back-propagation) at this time.  This is due to a reported error in the MPSGraph framework, and it is unknown if/when it will be fixed by Apple

@@ -99,8 +99,8 @@ struct LearningTests {
             
             //  Build the graph
             let graph = Graph {
-                PlaceHolder(shape: [1, 2], name: "inputs")
-                PlaceHolder(shape: [1], name: "expectedValue")
+                PlaceHolder(shape: [1, 2], type: .float32, name: "inputs")
+                PlaceHolder(shape: [1], type: .float32, name: "expectedValue")
                 Variable(values: weights, name: "weights")
                     .learnWithRespectTo("loss")
                 Variable(values: biases, name: "biases")
@@ -191,8 +191,8 @@ struct LearningTests {
             
             //  Build the graph
             let graph = Graph {
-                PlaceHolder(shape: [1, 2], name: "inputs")
-                PlaceHolder(shape: [1], name: "expectedValue")
+                PlaceHolder(shape: [1, 2], type: .float32, name: "inputs")
+                PlaceHolder(shape: [1], type: .float32, name: "expectedValue")
                 Variable(values: weights, name: "weights")
                     .learnWithRespectTo("loss")
                 Variable(values: biases, name: "biases")
@@ -288,8 +288,8 @@ struct LearningTests {
             
             //  Build the graph
             let graph = Graph {
-                PlaceHolder(shape: [1, 2], name: "inputs")
-                PlaceHolder(shape: [1], modes: ["learn"], name: "expectedValue")
+                PlaceHolder(shape: [1, 2], type: .float32, name: "inputs")
+                PlaceHolder(shape: [1], type: .float32, modes: ["learn"], name: "expectedValue")
                 Variable(values: weights1, name: "weights1")
                     .learnWithRespectTo("loss")
                 Variable(values: biases1, name: "biases1")
@@ -400,8 +400,8 @@ struct LearningTests {
             
             //  Build the graph
             let graph = Graph {
-                PlaceHolder(shape: [1, 2], name: "inputs")
-                PlaceHolder(shape: [1], name: "expectedValue")
+                PlaceHolder(shape: [1, 2], type: .float32, name: "inputs")
+                PlaceHolder(shape: [1], type: .float32, name: "expectedValue")
                 Variable(values: layer1weights, name: "weights1")
                     .learnWithRespectTo("loss")
                 Variable(values: layer1biases, name: "biases1")
@@ -504,8 +504,8 @@ struct LearningTests {
             
             //  Build the graph
             let graph = Graph {
-                PlaceHolder(shape: [1, 2], name: "inputs")
-                PlaceHolder(shape: [1], modes: ["learn"], name: "expectedValue")
+                PlaceHolder(shape: [1, 2], type: .float32, name: "inputs")
+                PlaceHolder(shape: [1], type: .float32, modes: ["learn"], name: "expectedValue")
                 FullyConnectedLayer(input: "inputs", outputShape: TensorShape([1]), activationFunction: .sigmoid, name: "result")
                     .learnWithRespectTo("loss")
                     .targetForModes(["infer"])
@@ -565,8 +565,8 @@ struct LearningTests {
         
         //  Build the graph
         let graph = Graph {
-            PlaceHolder(shape: [4], name: "inputs")
-            PlaceHolder(shape: [4], modes: ["learn"], name: "expectedValue")
+            PlaceHolder(shape: [4], type: .float32, name: "inputs")
+            PlaceHolder(shape: [4], type: .float32, modes: ["learn"], name: "expectedValue")
             BatchNormalization(input: "inputs", name: "result")
                 .learnWithRespectTo("loss")
                 .targetForModes(["infer"])
@@ -596,6 +596,68 @@ struct LearningTests {
         #expect(try abs(result.getElement(index: 2).asDouble - 4.0) < 1.0E-02)
         #expect(try abs(result.getElement(index: 3).asDouble - 4.0) < 1.0E-02)
     }
+    
+    @Test func TokenEmbeddingTest() async throws {
+        //  Eight tokens with embedding size of three - learn a binary code of the token
+        let tokenTensors = [
+            TensorInt32(shape: TensorShape([1]), initialValue: 0),
+            TensorInt32(shape: TensorShape([1]), initialValue: 1),
+            TensorInt32(shape: TensorShape([1]), initialValue: 2),
+            TensorInt32(shape: TensorShape([1]), initialValue: 3),
+            TensorInt32(shape: TensorShape([1]), initialValue: 4),
+            TensorInt32(shape: TensorShape([1]), initialValue: 5),
+            TensorInt32(shape: TensorShape([1]), initialValue: 6),
+            TensorInt32(shape: TensorShape([1]), initialValue: 7)
+        ]
+        let targetTensors = [
+            try TensorFloat32(shape: TensorShape([3]), initialValues: [0.0, 0.0, 0.0]),
+            try TensorFloat32(shape: TensorShape([3]), initialValues: [1.0, 0.0, 0.0]),
+            try TensorFloat32(shape: TensorShape([3]), initialValues: [0.0, 1.0, 0.0]),
+            try TensorFloat32(shape: TensorShape([3]), initialValues: [1.0, 1.0, 0.0]),
+            try TensorFloat32(shape: TensorShape([3]), initialValues: [0.0, 0.0, 1.0]),
+            try TensorFloat32(shape: TensorShape([3]), initialValues: [1.0, 0.0, 1.0]),
+            try TensorFloat32(shape: TensorShape([3]), initialValues: [0.0, 1.0, 1.0]),
+            try TensorFloat32(shape: TensorShape([3]), initialValues: [1.0, 1.0, 1.0])
+        ]
+        
+        //  Build the graph
+        let graph = Graph {
+            PlaceHolder(shape: [1], type: .int32, name: "token")
+            PlaceHolder(shape: [3], type: .float32, modes: ["learn", "lossCalc"], name: "expectedValue")
+            TokenEmbedding(tokens: "token", vocabularySize: 8, embeddingLength: 3, embeddingType: .float32, name: "result")
+                .learnWithRespectTo("loss")
+                .targetForModes(["infer"])
+            MeanSquaredErrorLoss(actual: "expectedValue", predicted: "result", name: "loss")
+                .targetForModes(["lossCalc", "learn"])
+            Learning(constant: true, learningRate: 0.1, learningModes: ["learn"])
+        }
+        
+        //  Get the initial total error
+        var totalError = 0.0
+        for token in 0..<8 {
+            let results = try graph.runOne(mode: "lossCalc", inputTensors: ["token": tokenTensors[token], "expectedValue" : targetTensors[token]])
+            let result = results["loss"]!
+            totalError += try result.getElement(index: 0).asDouble
+        }
+        let initialError = totalError
+        
+        //  Learn the embedding pattern
+        for _ in 0..<100 {
+            for token in 0..<8 {
+                _ = try graph.runOne(mode: "learn", inputTensors: ["token": tokenTensors[token], "expectedValue" : targetTensors[token]])
+            }
+        }
+        
+        //  Get the final total error
+        totalError = 0.0
+        for token in 0..<8 {
+            let results = try graph.runOne(mode: "lossCalc", inputTensors: ["token": tokenTensors[token], "expectedValue" : targetTensors[token]])
+            let result = results["loss"]!
+            totalError += try result.getElement(index: 0).asDouble
+        }
+        #expect((totalError * 100.0) < initialError)
+        #expect(totalError < 0.001)
+    }
 
     @Test func SpeedTest() async throws {
         //  Get a test data set
@@ -614,8 +676,8 @@ struct LearningTests {
         
         //  Create a simple graph
         let graph = Graph {
-            PlaceHolder(shape: [1, 2], name: "inputs")
-            PlaceHolder(shape: [3], modes: ["learn"], name: "expectedValue")
+            PlaceHolder(shape: [1, 2], type: .float32, name: "inputs")
+            PlaceHolder(shape: [3], type: .float32, modes: ["learn"], name: "expectedValue")
             FullyConnectedLayer(input: "inputs", outputShape: TensorShape([3]), activationFunction: .relu, name: "result")
                 .learnWithRespectTo("loss")
                 .targetForModes(["infer"])

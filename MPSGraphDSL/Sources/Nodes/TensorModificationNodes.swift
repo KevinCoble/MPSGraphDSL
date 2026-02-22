@@ -19,7 +19,7 @@ public class Reshape : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - shape: The new shape for the output tensor
+    ///   - shape: The new shape for the output tensor.  This shape can ignore the batch dimension on batch graphs - it will be pre-pended when needed
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, shape: TensorShape, name: String? = nil) {
         self.shape = shape
@@ -42,20 +42,31 @@ public class Reshape : UnaryNode {
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
-        //  If we have a fixed shape, get the tensor shape and compare
-        if let shape = shape {
-            if let incomingShape = inputTensor.shape {
-                let inputShape = TensorShape(fromMPS: incomingShape)
-                if (inputShape.totalSize != shape.totalSize) {
-                    throw MPSGraphDSLErrors.InputShapeError("Number of elements in input tensor shape and new shape must equal")
-                }
-            }
-        }
-
         //  Add to the graph itself
         let reshapeResult: MPSGraphTensor
         if let shape = shape {
-            reshapeResult = graph.mpsgraph.reshape(inputTensor, shape: shape.getMPSShape(), name: graph.getFullName(name))
+            var newShape = shape
+            //  If we have a fixed shape, get the tensor shape and compare
+            if let incomingShape = inputTensor.shape {
+                let inputShape = TensorShape(fromMPS: incomingShape)
+                if (inputShape.totalSize != shape.totalSize) {
+                    //  If a batch graph, see if the shape passed in was without the batch dimension
+                    if (graph.batchGraph) {
+                        let shapeWithBatch = shape.shapeWithAddedBatchDimension(graph.batchSize)
+                        if (inputShape.totalSize != shapeWithBatch.totalSize) {
+                            throw MPSGraphDSLErrors.InputShapeError("Number of elements in input tensor shape and new shape must equal")
+                        }
+                        
+                        //  Use the batch-dimension added shape in the graph
+                        newShape = shapeWithBatch
+                    }
+                    else {
+                        throw MPSGraphDSLErrors.InputShapeError("Number of elements in input tensor shape and new shape must equal")
+                    }
+                }
+            }
+            
+            reshapeResult = graph.mpsgraph.reshape(inputTensor, shape: newShape.getMPSShape(), name: graph.getFullName(name))
         }
         else {
             if let addedNode = graph.findNamedNode(newShapeTensor!) {

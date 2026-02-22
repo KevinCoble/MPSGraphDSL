@@ -471,12 +471,12 @@ public class Graph {
         return nil
     }
     
-    internal func getUnaryTensor(name: String? = nil) throws -> MPSGraphTensor {
+    internal func getUnaryTensor(name: String?) throws -> MPSGraphTensor {
         let tensor = try getOptionalTensor(name)
         return tensor
     }
     
-    internal func getBinaryTensors(_ name1: String? = nil, _ name2: String? = nil) throws -> (firstInputTensor: MPSGraphTensor, secondInputTensor: MPSGraphTensor) {
+    internal func getBinaryTensors(_ name1: String?, _ name2: String?) throws -> (firstInputTensor: MPSGraphTensor, secondInputTensor: MPSGraphTensor) {
         let firstTensor = try getOptionalTensor(name1)
          
         let secondTensor = try getOptionalTensor(name2)
@@ -484,7 +484,7 @@ public class Graph {
         return (firstInputTensor: firstTensor, secondInputTensor: secondTensor)
     }
     
-    internal func getTernaryTensors(_ name1: String? = nil, _ name2: String? = nil, _ name3: String? = nil) throws -> (firstInputTensor: MPSGraphTensor, secondInputTensor: MPSGraphTensor, thirdInputTensor: MPSGraphTensor) {
+    internal func getTernaryTensors(_ name1: String?, _ name2: String?, _ name3: String?) throws -> (firstInputTensor: MPSGraphTensor, secondInputTensor: MPSGraphTensor, thirdInputTensor: MPSGraphTensor) {
         let firstTensor = try getOptionalTensor(name1)
         
        let secondTensor = try getOptionalTensor(name2)
@@ -541,6 +541,10 @@ public class Graph {
     ///   - newϵ: (Optional) if a non-constant ϵ parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
     /// - Returns: an array of output tensors that are the result of the graph run
     public func runOne(mode: String, inputTensors: [String : Tensor], newLearningRate: Double? = nil, newβ1: Double? = nil, newβ2: Double? = nil, newϵ: Double? = nil) throws -> [String : Tensor] {
+        //  Get the graph ready
+        if (mpsgraph == nil) { try buildGraph() }
+        if (device == nil) { getCommandQueue() }
+        
         //  Verify the input tensors are usable
         var allAreBatchTensors: Bool = true
         for (key, value) in inputTensors {
@@ -558,10 +562,6 @@ public class Graph {
             }
         }
 
-        //  Get the graph ready
-        if (mpsgraph == nil) { try buildGraph() }
-        if (device == nil) { getCommandQueue() }
-        
         //  If a new learning rate or adam optimization parameter entered - set it
         if let newlearningRate = newLearningRate {
             learningRate = newlearningRate
@@ -693,6 +693,10 @@ public class Graph {
     ///   - newϵ: (Optional) if a non-constant ϵ parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
     /// - Returns: an array of output tensors that are the result of the graph run
     public func encodeOne(mode: String, inputTensors: [String : Tensor], waitForResults: Bool = true, newLearningRate: Double? = nil, newβ1: Double? = nil, newβ2: Double? = nil, newϵ: Double? = nil) throws -> [String : Tensor] {
+        //  Get the graph ready
+        if (mpsgraph == nil) { try buildGraph() }
+        if (device == nil) { getCommandQueue() }
+        
         //  Verify the input tensors are usable
         var allAreBatchTensors: Bool = true
         for (key, value) in inputTensors {
@@ -710,10 +714,6 @@ public class Graph {
             }
         }
 
-        //  Get the graph ready
-        if (mpsgraph == nil) { try buildGraph() }
-        if (device == nil) { getCommandQueue() }
-        
         let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
         
         //  If a new learning rate or adam optimization parameter entered - set it

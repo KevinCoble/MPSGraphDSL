@@ -1949,6 +1949,31 @@ public struct TensorInt32 : Tensor {
         
         return data
     }
+    
+// MARK: - Sequence functions
+    
+    public func getSequenceTensor(startIndices: [Int], length: Int) throws -> TensorInt32 {
+        //  Make sure this is a 1-dimensional sequence
+        if (shape.numDimensions != 1) { throw GenericMPSGraphDSLErrors.InvalidShape }
+        
+        //  Get the elements that make up the return tensor
+        var values: [Int32] = []
+        for startIndex in startIndices {
+            values += elements[startIndex..<startIndex+length]
+        }
+        
+        //  Create and return that tensor
+        if (startIndices.count == 1) {
+            //  Only one start index - return a 1-dimensional tensor
+            let tensor = try TensorInt32(shape: TensorShape([length]), initialValues: values)
+            return tensor
+        }
+        else {
+            //  More than one start index - return a 2-dimensional tensor
+            let tensor = try TensorInt32(shape: TensorShape([startIndices.count, length]), initialValues: values)
+            return tensor
+        }
+    }
 }
 
 ///  A Tensor with elements of type UInt8

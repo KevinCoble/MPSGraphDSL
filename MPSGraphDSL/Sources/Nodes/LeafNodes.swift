@@ -14,6 +14,7 @@ import MetalPerformanceShadersGraph
 ///  Not for SubGraphs - use SubGraphPlaceholder instead
 public class PlaceHolder : Node {
     let shape : TensorShape
+    let type : DataType
     let modes: [String]
     var batchExempt: Bool = false   //  If true the placeholder doesn't get a batch dimension added to it at build time
     
@@ -21,10 +22,12 @@ public class PlaceHolder : Node {
     /// 
     /// - Parameters:
     ///   - shape: The dimensional shape of the output tensor, specified as an array of Int.  Do not include batch dimension if using Graph batch
+    ///   - type: The data type of tensors that will be fed to this placeholder
     ///   - modes: (Optional) An array of strings for the modes this placeholder needs to be filled with data.  If an empty array, all modes are assumed.  Default is the empty array
     ///   - name:  The name for this node and its associated tensor.  Required for mapping input tensors into the graph
-    public init(shape: [Int], modes: [String] = [], name: String) {
+    public init(shape: [Int], type: DataType, modes: [String] = [], name: String) {
         self.shape = TensorShape(shape)
+        self.type = type
         self.modes = modes
         super.init(name: name)
     }
@@ -33,10 +36,12 @@ public class PlaceHolder : Node {
     ///
     /// - Parameters:
     ///   - shape: The dimensional shape of the output tensor, specified as a TensorShape struct.  Do not include batch dimension if using Graph batch
+    ///   - type: The data type of tensors that will be fed to this placeholder
     ///   - modes: (Optional) An array of strings for the modes this placeholder needs to be filled with data.  If an empty array, all modes are assumed.  Default is the empty array
     ///   - name:  The name for this node and its associated tensor.  Required for mapping input tensors into the graph
-    public init(shape: TensorShape, modes: [String] = [], name: String) {
+    public init(shape: TensorShape, type: DataType, modes: [String] = [], name: String) {
         self.shape = shape
+        self.type = type
         self.modes = modes
         super.init(name: name)
     }
@@ -49,7 +54,7 @@ public class PlaceHolder : Node {
         }
         
         //  Add to the graph itself
-        let inputPlaceholder = graph.mpsgraph.placeholder(shape: mpsShape, name: graph.getFullName(name))
+        let inputPlaceholder = graph.mpsgraph.placeholder(shape: mpsShape, dataType: type.getMPSDataType(), name: graph.getFullName(name))
         
         //  Add the placeholder to the feeds list
         let feedTensorInfo = feedTensorInfo(name: graph.getFullName(name)!, tensor: inputPlaceholder, modes: modes, batchExemption: batchExempt)

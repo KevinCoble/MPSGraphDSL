@@ -76,9 +76,37 @@ public class Clamp : TernaryNode {
         let inputTensors = try graph.getTernaryTensors(firstInputName, secondInputName, thirdInputName)
         
         //  Add to the graph itself
-        let additionResult = graph.mpsgraph.clamp(inputTensors.firstInputTensor, min: inputTensors.secondInputTensor, max: inputTensors.thirdInputTensor, name: graph.getFullName(name))
+        let clampResult = graph.mpsgraph.clamp(inputTensors.firstInputTensor, min: inputTensors.secondInputTensor, max: inputTensors.thirdInputTensor, name: graph.getFullName(name))
         
         //  Return the created MPSGraphTensor
-        return [additionResult]
+        return [clampResult]
+    }
+}
+
+///   Node to select values from two tensors based on a predicate tensor
+public class Select : TernaryNode {
+
+    /// Node to select values from two tensors based on a predicate tensor.  All tensors should be of same shape
+    /// - Parameters:
+    ///   - predicateTensor: (Optional)  The tensor that provides the boolean predicate value for each element.  If nil the previous node's output will be used
+    ///   - trueTensor: (Optional)  The tensor that provides the 'true' value for each element.  The output element will be set to this if the matching predicate element is 'true' (non-zero). If nil the previous node's output will be used
+    ///   - falseTensor: (Optional)  The tensor that provides the 'false' value for each element.  The output element will be set to this if the matching predicate element is 'false' (zero). If nil the previous node's output will be used
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(predicateTensor: String? = nil, trueTensor: String? = nil, falseTensor: String? = nil, name: String? = nil)  {
+        super .init(firstInput: predicateTensor, secondInput: trueTensor, thirdInput: falseTensor, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensors
+        let inputTensors = try graph.getTernaryTensors(firstInputName, secondInputName, thirdInputName)
+
+        //  Make sure all the tensors have the same shape
+        try checkEqualInputShapes(inputs: inputTensors)
+        
+        //  Add to the graph itself
+        let selectResult = graph.mpsgraph.select(predicate: inputTensors.firstInputTensor, trueTensor: inputTensors.secondInputTensor, falseTensor: inputTensors.thirdInputTensor, name: graph.getFullName(name))
+        
+        //  Return the created MPSGraphTensor
+        return [selectResult]
     }
 }
