@@ -176,7 +176,7 @@ public enum ActivationFunction {
                 let leakyReLUResult = graph.mpsgraph.leakyReLU(with: inputTensor, alpha: alpha, name: graph.getFullName(name))
                 return leakyReLUResult
             case .leakyReluFromTensor(let alphaName):
-                if let alphaNode = graph.findNamedNode(alphaName) {
+                if let alphaNode = try graph.findNamedNode(alphaName) {
                     let leakyReLUResult = graph.mpsgraph.leakyReLU(with: inputTensor, alphaTensor: alphaNode.mpstensor, name: graph.getFullName(name))
                     return leakyReLUResult
                 }

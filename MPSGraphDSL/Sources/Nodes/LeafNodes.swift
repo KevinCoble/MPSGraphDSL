@@ -348,7 +348,7 @@ public class Variable : Node {
         let variable: MPSGraphTensor
         var sourceTensor : MPSGraphTensor? = nil
         if case let .inputTensor(inputName) = valueSource {
-            if let addedNode = graph.findNamedNode(inputName) {
+            if let addedNode = try graph.findNamedNode(inputName) {
                 sourceTensor = addedNode.mpstensor
                 variable = graph.mpsgraph.variableFromTensor(sourceTensor!, name: graph.getFullName(name))
                 dataType = DataType(from: sourceTensor!.dataType)

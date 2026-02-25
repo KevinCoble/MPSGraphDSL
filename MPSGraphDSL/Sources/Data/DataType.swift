@@ -277,9 +277,9 @@ extension UInt8 : DataElement {
 
 extension Int32 : DataElement {
     ///  Class function to get the DataType of the DataElement
-    public static var dataType : DataType { get { return .uInt8 }}
+    public static var dataType : DataType { get { return .int32 }}
     ///  Instance function to get the DataType of the DataElement
-    public var dataType : DataType { get { return .uInt8 }}
+    public var dataType : DataType { get { return .int32 }}
     
     /// Get the default range of the data type
     public static var defaultRange : ParameterRange {

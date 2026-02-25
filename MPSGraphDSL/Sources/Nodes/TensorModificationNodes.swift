@@ -69,7 +69,7 @@ public class Reshape : UnaryNode {
             reshapeResult = graph.mpsgraph.reshape(inputTensor, shape: newShape.getMPSShape(), name: graph.getFullName(name))
         }
         else {
-            if let addedNode = graph.findNamedNode(newShapeTensor!) {
+            if let addedNode = try graph.findNamedNode(newShapeTensor!) {
                 reshapeResult = graph.mpsgraph.reshape(inputTensor, shapeTensor: addedNode.mpstensor, name: graph.getFullName(name))
             }
             else {
@@ -263,7 +263,7 @@ public class Split : UnaryNode {
             if (totalPartitionSize != axisSize) { throw MPSGraphDSLErrors.MorePartitionsThanDimensions }
         }
         if let splitSizesTensor = splitSizesTensor {
-            if let addedNode = graph.findNamedNode(splitSizesTensor) {
+            if let addedNode = try graph.findNamedNode(splitSizesTensor) {
                 if let shape = addedNode.mpstensor.shape {
                     let splitSizesShape = TensorShape(fromMPS: shape)
                     if (splitSizesShape.dimensions.count != 1) { throw MPSGraphDSLErrors.TensorNot1Dimensional(splitSizesTensor) }
@@ -293,7 +293,7 @@ public class Split : UnaryNode {
             partitionTensors = graph.mpsgraph.split(inputTensor, splitSizes: splitSizes.map { NSNumber(value: $0)}, axis: axis, name: graph.getFullName(name))
         }
         else {
-            let addedNode = graph.findNamedNode(splitSizesTensor!)!
+            let addedNode = try graph.findNamedNode(splitSizesTensor!)!
             partitionTensors = graph.mpsgraph.split(inputTensor, splitSizesTensor: addedNode.mpstensor, axis: axis, name: graph.getFullName(name))
         }
         
@@ -369,7 +369,7 @@ public class Reverse: UnaryNode {
             result = graph.mpsgraph.reverse(inputTensor, axes: axes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
         }
         else {
-            if let addedNode = graph.findNamedNode(axesTensor!) {
+            if let addedNode = try graph.findNamedNode(axesTensor!) {
                 result = graph.mpsgraph.reverse(inputTensor, axesTensor: addedNode.mpstensor, name: graph.getFullName(name))
             }
             else {

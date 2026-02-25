@@ -162,6 +162,18 @@ public enum MPSGraphNeuralNetErrors : Error {
     case OrthogonalizationOnNonFloatingTensor
 }
 
+///  Errors that can be thrown by the MPSGraph building system when dealing with control nodes (If, For, While)
+public enum MPSGraphControlNodeErrors : Error {
+    ///  Nodes in control blocks cannot be targets
+    case NodeInControlBlockCannotBeTarget
+    ///  Nodes in control blocks cannot be referenced outside block
+    case NodeInControlBlockCannotReferenceOutsideBlock
+    ///  A blockReturnIndex modifier was used on a node outside of a control block
+    case ReturnIndicesNotValidOutsideOfBlocks
+    ///  The blockReturnIndex modifiers resulted in non-consecutive numbers from 0 to number of return tensors
+    case InvalidReturnIndices
+}
+
 ///  Errors that can be thrown by the MPSGraph run system
 public enum MPSGraphRunErrors : Error {
     ///  The Graph was not built as a batch graph

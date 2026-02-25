@@ -13,6 +13,7 @@ import MetalPerformanceShadersGraph
 public class Node {
     let name: String?
     var targetModes : [String] = []
+    var returnIndex : Int?          //  If not nil, return from control block index
     var buildError : Error? = nil
     var referencedByAnotherNode: Bool = false
     
@@ -31,6 +32,14 @@ public class Node {
         return self
     }
     
+    /// Modifier for a Node to indicate it is to be returned from a control block (if, for, while).  By default only the last node is returned
+    /// - Parameter index: The position in the tensor return list for the node
+    /// - Returns: The modified Node
+    public func blockReturnIndex(_ index: Int?) -> Node {
+        returnIndex = index
+        return self
+    }
+
     var addToNodeList: Bool { return true }
     
     internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {

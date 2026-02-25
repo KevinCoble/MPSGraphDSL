@@ -389,3 +389,94 @@ let graph = Graph {
 The final names of nodes in SubGraphs are a composite name of the SubGraph and the node name.  The ``Constant`` node in the SubGraphDefinition will be added to the Graph as "subgraph_constat" since the SubGraph is named "subgraph" and the Constant is named "constant".  When referenced within the SubGraphDefinition you do not need to know the SubGraph name and just reference it using the name, as seen in the Addition node in the code above.  If referenced outside the SubGraphDefinition you would need to use the full name.  It is recommended that the input mapping is used rather than trying to use the full name.  Note the above definitions both have a "result" node.  As the Addition node would have a final name of "subgraph_result" there is no conflict.  Both nodes are targets, and so both will be in the result Tensor list with their full names.
 
 When a SubGraph is added to a Graph the nodes in the SubGraphDefinition are placed in the Graph just as they would if they were individually added instead.  This means the previous node shortcut will work.  The ``Negative`` node in the Graph definition does not have an input reference and so uses the output of the previous node.  This would be the last node of the SubGraph definition, the Addition node.
+
+##  Control Nodes
+
+Control nodes in MPSGraph include if-then-else, for loops, and while loops.  Due to the way they are implemented in MPSGraph, the DSL code cannot create the required closures for the loops (a method using macros may be implemented later).  However, the if-then-else control structure has been implemented.
+
+### If-Then-Else
+
+The ``If`` node can be used to add an if-then-else control structure to the graph.  The else block is required.  It is recommended (and maybe required by MPSGraph) that the returning tensors from the 'Then' and 'Else' blocks are the same count, size, and type.  An example of an if-then-else with one return tensor follows:
+
+```swift
+let graph = Graph {
+    PlaceHolder(shape: [1], type: .int32, name: "predicate")
+    
+    If("predicate", Then {
+        Constant(shape: [1], value: Int32(3))
+    },
+    Else {
+        Constant(shape: [1], value: Int32(5))
+    },
+       name: "if")
+        .targetForModes(["ifTest"])
+}
+```
+
+Each line is explained below:
+
+**let graph = Graph {**
+
+Create a graph.
+
+**PlaceHolder(shape: [1], type: .int32, name: "predicate")**
+
+The ``If`` node requires a predicate tensor - a scalar (generally integer) value that determines if the 'Then' or 'Else' block is executed.  If the scalar value is 0, the 'Else' block is used, else the 'Then' block is executed.
+
+**If("predicate", Then {**
+
+Start the ``If`` node, pass in the predicate tensor (if not provided, the previous node will be used), and start the 'Then' block.
+
+**Constant(shape: [1], value: Int32(3))**
+
+This is the code in the 'Then' block'.  As it is the last line, and no other tensor was listed as the return for the block, it will be returned by default
+
+**},**
+
+End the 'Then' block.
+
+**Else {**
+
+Start the definition of the 'Else' block.
+
+**Constant(shape: [1], value: Int32(3))**
+
+This is the code in the 'Else' block'.  Again, as it is the last line and no other tensor was listed as the return for the block, it will be returned by default
+
+**},**
+
+End the 'Else' block.
+
+**name: "if")**
+
+Finish the ``If`` node.  Control nodes require a name.  The return of this node will be the returned tensors from the blocks.  If there is only one returned tensor it is named with the node name itself.
+
+**.targetForModes(["ifTest"])**
+
+Make the If node a target for the graph.  All returned tensors from the node are marked as targets.
+
+**}**
+
+End the graph definition.
+
+A multi-tensor return If node would look like:
+
+```swift
+If("predicate", Then {
+    Constant(shape: [1], value: Int32(3))
+        .blockReturnIndex(0)
+    Constant(shape: [1], value: Int32(4))
+        .blockReturnIndex(1)
+},
+Else {
+    Constant(shape: [1], value: Int32(5))
+        .blockReturnIndex(1)
+    Constant(shape: [1], value: Int32(6))
+        .blockReturnIndex(0)
+},
+   name: "if")
+```
+
+Note that the nodes in the 'Then' and 'Else' blocks have 'blockReturnIndex' modifiers on them.  This makes the tensors from those nodes the return tensors for the block.  The order of the returned tensors is given by the integer passed in the modifier.  If the node being modified results in more than one tensor, all tensors are returned, and given sequential return index numbers.  For example if a modifier of 'blockReturnIndex(1)' was added to a node that returns two tensors, those tensors would be returned from the block as the second (index 1) and third (index 2) tensors in the return list.
+
+The returned tensors from a multiple-tensor If node are labelled with the node name and suffixes "_0", "_1", "_2", etc.

@@ -51,79 +51,19 @@ public class GRU: UnaryNode {
         let recurrentMPSTensor = try graph.getOptionalTensor(recurrentWeight)
         
         //  Get the input weight tensor
-        let inputMPSTensor: MPSGraphTensor?
-        if let inputWeight = inputWeight {
-            if let addedNode = graph.findNamedNode(inputWeight) {
-                inputMPSTensor = addedNode.mpstensor
-            }
-            else {
-                throw MPSGraphDSLErrors.NamedTensorNotFound(inputWeight)
-            }
-        }
-        else {
-            //  nil input weight tensor node name - set to nil to not use
-            inputMPSTensor = nil
-        }
+        let inputMPSTensor = try graph.getNamedTensorOrNil(inputWeight)
         
         //  Get the bias tensor
-        let biasMPSTensor: MPSGraphTensor?
-        if let bias = bias {
-            if let addedNode = graph.findNamedNode(bias) {
-                biasMPSTensor = addedNode.mpstensor
-            }
-            else {
-                throw MPSGraphDSLErrors.NamedTensorNotFound(bias)
-            }
-        }
-        else {
-            //  nil bias tensor node name - set to nil to not use
-            biasMPSTensor = nil
-        }
+        let biasMPSTensor = try graph.getNamedTensorOrNil(bias)
         
         //  Get the init state tensor
-        let initStateMPSTensor: MPSGraphTensor?
-        if let initState = initState {
-            if let addedNode = graph.findNamedNode(initState) {
-                initStateMPSTensor = addedNode.mpstensor
-            }
-            else {
-                throw MPSGraphDSLErrors.NamedTensorNotFound(initState)
-            }
-        }
-        else {
-            //  nil init state tensor node name - set to nil to not use
-            initStateMPSTensor = nil
-        }
+        let initStateMPSTensor = try graph.getNamedTensorOrNil(initState)
         
         //  Get the mask tensor
-        let maskMPSTensor: MPSGraphTensor?
-        if let mask = mask {
-            if let addedNode = graph.findNamedNode(mask) {
-                maskMPSTensor = addedNode.mpstensor
-            }
-            else {
-                throw MPSGraphDSLErrors.NamedTensorNotFound(mask)
-            }
-        }
-        else {
-            //  nil mask tensor node name - set to nil to not use
-            maskMPSTensor = nil
-        }
+        let maskMPSTensor = try graph.getNamedTensorOrNil(mask)
         
         //  Get the secondary bias tensor
-        let secondaryBiasMPSTensor: MPSGraphTensor?
-        if let secondaryBias = secondaryBias {
-            if let addedNode = graph.findNamedNode(secondaryBias) {
-                secondaryBiasMPSTensor = addedNode.mpstensor
-            }
-            else {
-                throw MPSGraphDSLErrors.NamedTensorNotFound(secondaryBias)
-            }
-        }
-        else {
-            //  nil peephole tensor node name - set to nil to not use
-            secondaryBiasMPSTensor = nil
-        }
+        let secondaryBiasMPSTensor = try graph.getNamedTensorOrNil(secondaryBias)
 
         //  Get the output suffixes
         suffixes = []

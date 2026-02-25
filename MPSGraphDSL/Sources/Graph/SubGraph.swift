@@ -41,14 +41,14 @@ public class SubGraph : Node {
     /// - Parameter modes: The modes that this node is a target for
     /// - Returns: The modified Node
     override public func targetForModes(_ modes: [String]) -> Node {
-        buildError = MPSGraphDSLErrors.TargetNodesMustBeNamed
+        buildError = MPSGraphDSLErrors.NodeCannotBeTarget
         return self
     }
     
     
     override var addToNodeList: Bool { return false }
 
-    ///  Constructor for a negative (negation) operation
+    ///  Constructor for a subgraph addition to a graph
     ///
     /// - Parameters:
     ///   - definition: The SubGraphDefinition to be instantiated
