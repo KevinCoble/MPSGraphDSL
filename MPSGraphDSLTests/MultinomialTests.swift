@@ -12,7 +12,7 @@ import MetalPerformanceShadersGraph
 
 struct MultinomialTest {
 
-    @Test(.disabled("insufficient memory error when run in parallel"))
+    @Test(.disabled("Passes, but get Insufficient Memory errors when ran in parallel"))
     func SingleDistribution() async throws {
         //  Create a single probability distribution of four logits
         let probabilityTensor = try TensorFloat32(shape: TensorShape([4]), initialValues: [0.2, 0.1, 0.4, 0.3])
@@ -39,7 +39,7 @@ struct MultinomialTest {
         #expect((hits[3]) > 250 && (hits[3] < 350))
     }
 
-    @Test(.disabled("insufficient memory error when run in parallel"))
+    @Test(.disabled("Passes, but get Insufficient Memory errors when ran in parallel"))
     func MultipleDistribution() async throws {
         //  Create a two probability distributions of four logits
         let probabilityTensor = try TensorFloat32(shape: TensorShape([2, 4]), initialValues: [0.2, 0.1, 0.4, 0.3, 0.1, 0.1, 0.7, 0.1])
@@ -72,7 +72,7 @@ struct MultinomialTest {
         #expect((hits[1][3]) >  50 && (hits[1][3] < 150))
     }
     
-    @Test(.disabled("insufficient memory error when run in parallel"))
+    @Test(.disabled("Passes, but get Insufficient Memory errors when ran in parallel"))
     func MultiDimensionalDistribution() async throws {
         //  Create a two-dimensional matrix of probability distributions of four logits
         let probabilityTensor = try TensorFloat32(shape: TensorShape([2, 2, 4]), initialValues: [0.2, 0.1, 0.4, 0.3, 0.1, 0.1, 0.7, 0.1, 0.3, 0.2, 0.2, 0.4, 0.4, 0.3, 0.1, 0.2])

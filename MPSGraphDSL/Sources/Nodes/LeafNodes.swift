@@ -610,7 +610,6 @@ public class RandomUniformTensor : Node {
 }
 
 
-
 ///  Leaf Node that provides a tensor of a specified shape with coordinate values along the given axis
 public class CoordinateTensor : Node {
     let axis: Int
@@ -622,7 +621,7 @@ public class CoordinateTensor : Node {
 
     /// Create a coordinate tensor of the given shape with the coordinate index along the specified axis filled into the values
     /// - Parameters:
-    ///   - alongAxis: the axis along which the coordinate values are used to fill in the tensor
+    ///   - alongAxis: the axis along which the coordinate values are used to fill in the tensor.  Adjusted for batch if adjustAxesForBatch is true
     ///   - withShape: the shape of the output tensor
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(alongAxis: Int, withShape: [Int], name: String? = nil) {
@@ -637,7 +636,7 @@ public class CoordinateTensor : Node {
 
     /// Create a coordinate tensor of the given shape with the coordinate index along the specified axis filled into the values
     /// - Parameters:
-    ///   - alongAxis: the axis along which the coordinate values are used to fill in the tensor
+    ///   - alongAxis: the axis along which the coordinate values are used to fill in the tensor.  Adjusted for batch if adjustAxesForBatch is true
     ///   - withShape: the shape of the output tensor
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(alongAxis: Int, withShape: TensorShape, name: String? = nil) {
@@ -652,7 +651,7 @@ public class CoordinateTensor : Node {
 
     /// Create a coordinate tensor of the given shape with the coordinate index along the specified axis filled into the values
     /// - Parameters:
-    ///   - alongAxis: the axis along which the coordinate values are used to fill in the tensor
+    ///   - alongAxis: the axis along which the coordinate values are used to fill in the tensor.  Adjusted for batch if adjustAxesForBatch is true
     ///   - withShapeTensor: (Optional) The name of the tensor that will provide the shape of the output tensor.  If nil the previous node's output will be used
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(alongAxis: Int, withShapeTensor: String? = nil, name: String? = nil) {
@@ -712,6 +711,7 @@ public class CoordinateTensor : Node {
 
     override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
         let result: MPSGraphTensor
+        
         if (useAxisTensor) {
             let axisMPSTensor = try graph.getOptionalTensor(axisTensor)
             if (useShapeTensor) {
@@ -723,16 +723,178 @@ public class CoordinateTensor : Node {
             }
         }
         else {
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+            let adjustedAxis = adjust ? axis+1 : axis
+            
             if (useShapeTensor) {
                 let shapeMPSTensor = try graph.getOptionalTensor(shapeTensor)
-                result = graph.mpsgraph.coordinate(alongAxis: axis, withShapeTensor: shapeMPSTensor, name: graph.getFullName(name))
+                result = graph.mpsgraph.coordinate(alongAxis: adjustedAxis, withShapeTensor: shapeMPSTensor, name: graph.getFullName(name))
             }
             else {
-                result = graph.mpsgraph.coordinate(alongAxis: axis, withShape: shape.map { NSNumber(value: $0)}, name: graph.getFullName(name))
+                result = graph.mpsgraph.coordinate(alongAxis: adjustedAxis, withShape: shape.map { NSNumber(value: $0)}, name: graph.getFullName(name))
             }
         }
         
         //  Return the created MPSGraphTensor
         return [result]
+    }
+}
+
+
+///  Leaf Node that provides a tensor of a scalar zero of the specified type
+///  The tensor is global to the graph, and will be reused by other references an internal nodes
+public class ZeroTensor : Node {
+    let type: DataType
+    
+    /// Create and or get a tensor to provide a scalar0 value of the specified type.  The tensor is global to the graph, so additional nodes will not add additional tensors
+    /// - Parameters:
+    ///   - type: the data type of the node
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(type: DataType, name: String? = nil) {
+        self.type = type
+        super.init(name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the global tensor
+        let zero = graph.getZeroTensor(type: type)
+        
+        return [zero]
+    }
+}
+
+
+///  Leaf Node that provides a tensor of a scalar one of the specified type
+///  The tensor is global to the graph, and will be reused by other references an internal nodes
+public class OneTensor : Node {
+    let type: DataType
+    
+    /// Create and or get a tensor to provide a scalar 1 value of the specified type.  The tensor is global to the graph, so additional nodes will not add additional tensors
+    /// - Parameters:
+    ///   - type: the data type of the node
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(type: DataType, name: String? = nil) {
+        self.type = type
+        super.init(name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the global tensor
+        let zero = graph.getOneTensor(type: type)
+        
+        return [zero]
+    }
+}
+
+
+///  Leaf Node that provides a tensor of with continuous random values by setting an initial Philox state value and updating that state with each access
+///  Values are of type Float32, shape is specifiable.  A seed can be supplied if repeatability is needed.
+public class RandomTensor : Node {
+    let shape: TensorShape
+    let seed: Int?
+    let normalDistribution: Bool
+    let mean: Float
+    let standardDeviation: Float
+
+    var suffixes: [String] = []
+    var targetIndices: [Int] = []
+
+    /// Create and or get a tensor to provide a continuous stream of uniform random values between 0 and 1
+    /// - Parameters:
+    ///   - type: the shape of the returned tensor.  All values are individually random
+    ///   - seed: (Optional).  The seed for the random generator.  If nil a random seed will be generated each time the graph is built.
+    ///   - name: The name for this node and its associated tensor
+    public init(shape: TensorShape, seed: Int? = nil, name: String) {
+        self.shape = shape
+        self.seed = seed
+        self.normalDistribution = false
+        self.mean = 0.0
+        self.standardDeviation = 0.0
+        super.init(name: name)
+    }
+
+    /// Create and or get a tensor to provide a continuous stream of normal distribution random values
+    /// - Parameters:
+    ///   - type: the shape of the returned tensor.  All values are individually random
+    ///   - mean: the mean for the distribution
+    ///   - standardDeviation: the standard deviation for the distribution
+    ///   - seed: (Optional).  The seed for the random generator.  If nil a random seed will be generated each time the graph is built.
+    ///   - name: The name for this node and its associated tensor
+    public init(shape: TensorShape, mean: Float, standardDeviation: Float, seed: Int? = nil, name: String) {
+        self.shape = shape
+        self.seed = seed
+        self.normalDistribution = true
+        self.mean = mean
+        self.standardDeviation = standardDeviation
+        super.init(name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        var addedTensors: [MPSGraphTensor?] = []
+        
+        suffixes = []
+        targetIndices = []
+
+        //  Get the seed for the random generator
+        let randomSeed: Int
+        if let seed = seed {
+            randomSeed = seed
+        }
+        else {
+            randomSeed = Int.random(in: 0...Int.max)
+        }
+        
+       //  Get a Philox state tensor as Data
+        let randomGraph = MPSGraph()
+        let randomPhiloxStateTensor = randomGraph.randomPhiloxStateTensor(withSeed: randomSeed, name: "state_tensor")
+        let randomStateResults = randomGraph.run(feeds: [:], targetTensors: [randomPhiloxStateTensor], targetOperations: nil)
+        let randomStateResult = randomStateResults[randomPhiloxStateTensor]!
+        let randomStateTensor = TensorInt32(fromMPSTensorData: randomStateResult)
+        
+        //  Set up the state tensor variable
+        let stateVariable = graph.mpsgraph.variable(with: randomStateTensor.getData(), shape: [7], dataType: .int32, name: graph.getFullName(name)! + "_random_state_variable")
+        addedTensors.append(stateVariable)
+        suffixes.append("_random_state_variable")
+        
+        //  Set up the random generator
+        let random: [MPSGraphTensor]
+        if (normalDistribution) {
+            let description = MPSGraphRandomOpDescriptor()
+            description.dataType = .float32
+            description.distribution = .normal
+            description.max = Float.greatestFiniteMagnitude
+            description.mean = mean
+            description.min = -Float.greatestFiniteMagnitude
+            description.standardDeviation = standardDeviation
+            
+            random = graph.mpsgraph.randomTensor(withShape: shape.getMPSShape(), descriptor: description, stateTensor: stateVariable, name: graph.getFullName(name)! + "_random")
+        }
+        else {
+            random = graph.mpsgraph.randomUniformTensor(withShape: shape.getMPSShape(), stateTensor: stateVariable, name: graph.getFullName(name)! + "_random")
+        }
+        addedTensors.append(random[0])
+        suffixes.append("_random")
+        
+        //  Update the random state
+        let randomStateAssign = graph.mpsgraph.assign(stateVariable, tensor: random[1], name: graph.getFullName(name)! + "_random_state_assign")
+        graph.nodeNonLearningOps.append(randomStateAssign)
+        graph.nodeLearningOps.append(randomStateAssign)
+
+        //  Reshape the random values to the specified shape - the MPSGraph nodes return variable shapes
+        let randomReshaped = graph.mpsgraph.reshape(random[0], shape: shape.getMPSShape(), name: graph.getFullName(name)!)
+        addedTensors.append(randomReshaped)
+        suffixes.append("")
+
+        targetIndices = [addedTensors.count-1]    //  The final indices are the targetted tensor
+        return addedTensors
+    }
+    
+    override internal func getNodeSuffixes() -> [String] {
+        return suffixes
+    }
+    
+    //  Get the indices for added tensors of target nodes that should be added to the target tensor list - if nil returned all tensors get targetted
+    override internal func getTargetIndices() -> [Int]? {
+        return targetIndices
     }
 }

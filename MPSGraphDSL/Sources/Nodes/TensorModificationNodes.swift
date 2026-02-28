@@ -49,12 +49,22 @@ public class Reshape : UnaryNode {
             //  If we have a fixed shape, get the tensor shape and compare
             if let incomingShape = inputTensor.shape {
                 let inputShape = TensorShape(fromMPS: incomingShape)
-                if (inputShape.totalSize != shape.totalSize) {
+                //  If either of the shapes are variable, let MPSGraph sort it out...
+                if (shape.isVariable || inputShape.isVariable) {
+                    //  If a batch graph and the first dimension of new shape doesn't match the batch, add it
+                    if (graph.batchGraph && (shape.dimensions[0] != graph.batchSize)) {
+                        newShape = shape.shapeWithAddedBatchDimension(graph.batchSize)
+                    }
+                }
+                else if (inputShape.totalSize != shape.totalSize) {
                     //  If a batch graph, see if the shape passed in was without the batch dimension
                     if (graph.batchGraph) {
                         let shapeWithBatch = shape.shapeWithAddedBatchDimension(graph.batchSize)
                         if (inputShape.totalSize != shapeWithBatch.totalSize) {
-                            throw MPSGraphDSLErrors.InputShapeError("Number of elements in input tensor shape and new shape must equal")
+                            //  Make sure we're not getting rid of a variable dimension
+                            if (inputShape.totalSize != -shapeWithBatch.totalSize) {
+                                throw MPSGraphDSLErrors.InputShapeError("Number of elements in input tensor shape and new shape must equal")
+                            }
                         }
                         
                         //  Use the batch-dimension added shape in the graph
@@ -92,7 +102,7 @@ public class Concatenate : Node {
     ///
     /// - Parameters:
     ///   - tensors: The name of the tensors that will be concatenated.  If the previous node's tensor is to be used, you can pass a nil for the name
-    ///   - dimension: The index of the dimension along which the tensors will be concatenated (0 based index into the shape)
+    ///   - dimension: The index of the dimension along which the tensors will be concatenated (0 based index into the shape).  Adjusted for batch if adjustAxesForBatch is true
     ///   - interleave: (Optional) If true, the tensors will be interleaved, rather than just placed end-to-end
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ tensors: [String?], dimension: Int, interleave: Bool = false, name: String? = nil) {
@@ -118,16 +128,20 @@ public class Concatenate : Node {
             inputTensors.append(inputTensor)
         }
         
+        //  Get the batch adjusted dimension
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+        let adjustedDimension = adjust ? dimension+1 : dimension
+        
         //  Add to the graph itself
         let outputTensor : MPSGraphTensor
         if (inputTensors.count == 2 && !interleave) {
-            outputTensor = graph.mpsgraph.concatTensor(inputTensors[0], with: inputTensors[1], dimension: dimension, name: graph.getFullName(name))
+            outputTensor = graph.mpsgraph.concatTensor(inputTensors[0], with: inputTensors[1], dimension: adjustedDimension, name: graph.getFullName(name))
         }
         else if (interleave) {
-            outputTensor = graph.mpsgraph.concatTensors(inputTensors, dimension: dimension, interleave: interleave, name: graph.getFullName(name))
+            outputTensor = graph.mpsgraph.concatTensors(inputTensors, dimension: adjustedDimension, interleave: interleave, name: graph.getFullName(name))
         }
         else {
-            outputTensor = graph.mpsgraph.concatTensors(inputTensors, dimension: dimension, name: graph.getFullName(name))
+            outputTensor = graph.mpsgraph.concatTensors(inputTensors, dimension: adjustedDimension, name: graph.getFullName(name))
         }
         
         return [outputTensor]
@@ -143,7 +157,7 @@ public class Stack : Node {
     ///
     /// - Parameters:
     ///   - tensors: The name of the tensors that will be concatenated.  If the previous node's tensor is to be used, you can pass a nil for the name
-    ///   - axis: The axis along which the tensors will be concatenated (0 based index into the shape)
+    ///   - axis: The axis along which the tensors will be concatenated (0 based index into the shape).  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ tensors: [String?], axis: Int, name: String? = nil) {
         self.inputs = tensors
@@ -167,8 +181,12 @@ public class Stack : Node {
             inputTensors.append(inputTensor)
         }
         
+        //  Get the batch adjusted axis
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+        let adjustedAxis = adjust ? axis+1 : axis
+
         //  Add to the graph itself
-         let outputTensor = graph.mpsgraph.stack(inputTensors, axis: axis, name: graph.getFullName(name))
+         let outputTensor = graph.mpsgraph.stack(inputTensors, axis: adjustedAxis, name: graph.getFullName(name))
         
         return [outputTensor]
     }
@@ -189,7 +207,7 @@ public class Split : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The index of the dimension along which the tensors will be split (0 based index into the shape)
+    ///   - axis: The index of the dimension along which the tensors will be split (0 based index into the shape).  Adjusted for batch if adjustAxesForBatch is true
     ///   - numberOfSplits: The number of partitions made of the tensor.  These will be equal sized, if possible
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, axis: Int, numberOfSplits: Int, name: String? = nil) {
@@ -203,7 +221,7 @@ public class Split : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The index of the dimension along which the tensors will be split (0 based index into the shape)
+    ///   - axis: The index of the dimension along which the tensors will be split (0 based index into the shape).  Adjusted for batch if adjustAxesForBatch is true
     ///   - numberOfSplits: The size of each partition.  The total of these sizes should match the dimension size along the axis
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, axis: Int, splitSizes: [Int], name: String? = nil) {
@@ -217,7 +235,7 @@ public class Split : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The index of the dimension along which the tensors will be split (0 based index into the shape)
+    ///   - axis: The index of the dimension along which the tensors will be split (0 based index into the shape).  Adjusted for batch if adjustAxesForBatch is true
     ///   - splitSizesTensor: (Optional) The tensor with the size of each partition.  The total of these sizes should match the dimension size along the axis.  If nil, the previous node is used
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, axis: Int, splitSizesTensor: String?, name: String? = nil) {
@@ -232,14 +250,18 @@ public class Split : UnaryNode {
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
+        //  Get the batch adjusted axis
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+        let adjustedAxis = adjust ? axis+1 : axis
+
         //  Get the input size along the specified axis
         var axisSize: Int = 0
         if let shape = inputTensor.shape {
             let inputShape = TensorShape(fromMPS: shape)
-            if axis < 0 || axis >= inputShape.dimensions.count {
+            if adjustedAxis < 0 || adjustedAxis >= inputShape.dimensions.count {
                 throw GenericMPSGraphDSLErrors.InvalidDimension
             }
-            axisSize = inputShape.dimensions[axis]
+            axisSize = inputShape.dimensions[adjustedAxis]
         }
         else {
             throw GenericMPSGraphDSLErrors.UnknownShape
@@ -287,14 +309,14 @@ public class Split : UnaryNode {
         //  Add the operation to the graph
         var partitionTensors: [MPSGraphTensor]
         if let numberOfSplits = numberOfSplits {
-            partitionTensors = graph.mpsgraph.split(inputTensor, numSplits: numberOfSplits, axis: axis, name: graph.getFullName(name))
+            partitionTensors = graph.mpsgraph.split(inputTensor, numSplits: numberOfSplits, axis: adjustedAxis, name: graph.getFullName(name))
         }
         else if let splitSizes = splitSizes {
-            partitionTensors = graph.mpsgraph.split(inputTensor, splitSizes: splitSizes.map { NSNumber(value: $0)}, axis: axis, name: graph.getFullName(name))
+            partitionTensors = graph.mpsgraph.split(inputTensor, splitSizes: splitSizes.map { NSNumber(value: $0)}, axis: adjustedAxis, name: graph.getFullName(name))
         }
         else {
             let addedNode = try graph.findNamedNode(splitSizesTensor!)!
-            partitionTensors = graph.mpsgraph.split(inputTensor, splitSizesTensor: addedNode.mpstensor, axis: axis, name: graph.getFullName(name))
+            partitionTensors = graph.mpsgraph.split(inputTensor, splitSizesTensor: addedNode.mpstensor, axis: adjustedAxis, name: graph.getFullName(name))
         }
         
         return partitionTensors
@@ -309,11 +331,11 @@ public class Split : UnaryNode {
 public class Reverse: UnaryNode {
     let axes: [Int]?
     let axesTensor: String?
+    
     ///  Constructor for an reverse  operation across all axis
     ///
     /// - Parameters: 
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axes: an array of indices for the axes that the operation should be carried out for
     ///   - name: (Optional) The name for this node and its associated tensor
     override public init(input: String? = nil, name: String? = nil) {
         self.axes = nil
@@ -324,7 +346,7 @@ public class Reverse: UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: An array of indices of the dimensions along which the tensors will be reversed
+    ///   - axes: An array of indices of the dimensions along which the tensors will be reversed.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, axes: [Int], name: String? = nil) {
         self.axes = axes
@@ -335,7 +357,7 @@ public class Reverse: UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axisTensor: (Optional) The name of a tensor that provides an array of indices of the dimensions along which the tensors will be reversed.  If nil the previous node's output will be used
+    ///   - axesTensor: (Optional) The name of a tensor that provides an array of indices of the dimensions along which the tensors will be reversed.  If nil the previous node's output will be used
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, axesTensor: String? = nil, name: String? = nil) {
         self.axes = nil
@@ -348,10 +370,14 @@ public class Reverse: UnaryNode {
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
         //  If we have specified axis, make sure they fit with the input tensor shape
+        var adjustedAxes: [Int] = []
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
         if let axes = axes {
             if let shape = inputTensor.shape {
                 for axis in axes {
-                    if (axis <= 0 || axis > shape.count) { throw MPSGraphDSLErrors.DoesNotContainDimension }
+                    let adjustedAxis = adjust ? axis+1 : axis
+                    if (adjustedAxis <= 0 || adjustedAxis > shape.count) { throw MPSGraphDSLErrors.DoesNotContainDimension }
+                    adjustedAxes.append(adjustedAxis)
                 }
             }
             else {
@@ -365,8 +391,8 @@ public class Reverse: UnaryNode {
         if (axes == nil && axesTensor == nil) {
             result = graph.mpsgraph.reverse(inputTensor, name: graph.getFullName(name))
         }
-        else if let axes = axes {
-            result = graph.mpsgraph.reverse(inputTensor, axes: axes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
+        else if (axes != nil) {
+            result = graph.mpsgraph.reverse(inputTensor, axes: adjustedAxes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
         }
         else {
             if let addedNode = try graph.findNamedNode(axesTensor!) {
@@ -440,8 +466,8 @@ public class Transpose : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - swapDimension:  The zero-based index of the dimension to be swapped
-    ///   - withDimension:  The zero-based index of the dimension to swap with the previous indexed dimension
+    ///   - swapDimension:  The zero-based index of the dimension to be swapped.  Adjusted for batch if adjustAxesForBatch is true
+    ///   - withDimension:  The zero-based index of the dimension to swap with the previous indexed dimension.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, swapDimension: Int, withDimension: Int, name: String? = nil) {
         dimension1 = swapDimension
@@ -458,6 +484,7 @@ public class Transpose : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - name: (Optional) The name for this node and its associated tensor
+    ///   - permutation:  The permutation list of new dimensions in the order of the current dimensions.  If the number of axes in the permutation list is one less than the input tensor rank and the graph is a batch graph, the indices are incremented and a batch dimension prepended
     public init(input: String? = nil, permutation: [Int], name: String? = nil) {
         dimension1 = -1
         dimension2 = -1
@@ -470,27 +497,46 @@ public class Transpose : UnaryNode {
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
         //  Make sure it is a matrix
+        var adjustPermutation = false
         if let shape = inputTensor.shape {
             if (shape.count == 1) { throw MPSGraphDSLErrors.TransposeOnVectorNotSupported }
             if (shape.count > 2 && (dimension1 == -1 || dimension2 == -1) && permutation.count < 1) { throw  MPSGraphDSLErrors.TransposeNeedsDimensionSpecification }
             
             //  If there is a permutation array, check it
             if (permutation.count > 0) {
-                if (permutation.count != shape.count) { throw MPSGraphDSLErrors.PermutationArrayMustHaveAllDimensions }
+                if (permutation.count == shape.count-1 && graph.batchGraph) { adjustPermutation = true }
+                if (permutation.count != shape.count || !adjustPermutation) { throw MPSGraphDSLErrors.PermutationArrayMustHaveAllDimensions }
                 for i in 0..<permutation.count {
                     if (!permutation.contains(i)) { throw MPSGraphDSLErrors.PermutationArrayMustHaveAllDimensions }
                 }
             }
         }
+        else {
+            throw GenericMPSGraphDSLErrors.UnknownShape
+        }
 
         //  Add to the graph itself
         if (permutation.count > 1) {
-            let result = graph.mpsgraph.transpose(inputTensor, permutation: permutation.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+            //  Adjust permutation matrix if needed
+            let adjustedPermutation : [Int]
+            if (adjustPermutation) {
+                adjustedPermutation = [0] + permutation.map { $0 + 1 }
+            }
+            else {
+                adjustedPermutation = permutation
+            }
+            let result = graph.mpsgraph.transpose(inputTensor, permutation: adjustedPermutation.map { NSNumber(value: $0) }, name: graph.getFullName(name))
             return [result]
         }
         else {
-            let dim1 : Int = dimension1 == -1 ? 0 : dimension1
-            let dim2 : Int = dimension2 == -1 ? 1 : dimension2
+            var dim1 : Int = dimension1 == -1 ? 0 : dimension1
+            var dim2 : Int = dimension2 == -1 ? 1 : dimension2
+            //  Get the batch adjusted dimension
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+            if (adjust) {
+                dim1 += 1
+                dim2 += 1
+            }
             let result = graph.mpsgraph.transposeTensor(inputTensor, dimension: dim1, withDimension: dim2, name: graph.getFullName(name))
             return [result]
         }
@@ -529,7 +575,7 @@ public class Slice : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - dimension:  The zero-based index of the dimension to be sliced
+    ///   - dimension:  The zero-based index of the dimension to be sliced.  Adjusted for batch if adjustAxesForBatch is true
     ///   - start:  The index within the dimension that the generated slice will start from
     ///   - length:  The size along the specified dimension that the resulting tensor will have
     ///   - name: (Optional) The name for this node and its associated tensor
@@ -556,12 +602,12 @@ public class Slice : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - starts:  An array of starting indices for each dimension of the tensor for the slice
-    ///   - ends:  An array of ending indices for each dimension of the tensor for the slice
-    ///   - strides:  An array of strides for each dimension of the tensor for the slice
-    ///   - ignoreStartsOnDimension:  (Optional) An array of dimension indices that will have their start index ignored
-    ///   - ignoreEndsOnDimensions:  (Optional) An array of dimension indices that will have their end index ignored
-    ///   - removeDimensions:  (Optional) An array of dimension that will be removed from the slice
+    ///   - starts:  An array of starting indices for each dimension of the tensor for the slice.  Adjusted for batch if adjustAxesForBatch is true
+    ///   - ends:  An array of ending indices for each dimension of the tensor for the slice.  Adjusted for batch if adjustAxesForBatch is true
+    ///   - strides:  An array of strides for each dimension of the tensor for the slice  Adjusted for batch if adjustAxesForBatch is true
+    ///   - ignoreStartsOnDimension:  (Optional) An array of dimension indices that will have their start index ignored  Adjusted for batch if adjustAxesForBatch is true
+    ///   - ignoreEndsOnDimensions:  (Optional) An array of dimension indices that will have their end index ignored  Adjusted for batch if adjustAxesForBatch is true
+    ///   - removeDimensions:  (Optional) An array of dimension that will be removed from the slice.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, starts: [Int], ends: [Int], strides: [Int], ignoreStartsOnDimension: [Int] = [], ignoreEndsOnDimensions: [Int] = [], removeDimensions: [Int] = [], name: String? = nil) {
         self.dimension = 0
@@ -625,7 +671,7 @@ public class Slice : UnaryNode {
     ///   - strideNode:  (Optional)) The name of the node that will provide the array of strides for each dimension.  If nil the previous node's output will be used
     ///   - ignoreStartsOnDimension:  (Optional) An array of dimension indices that will have their start index ignored
     ///   - ignoreEndsOnDimensions:  (Optional) An array of dimension indices that will have their end index ignored
-    ///   - removeDimensions:  (Optional) An array of dimension that will be removed from the slice
+    ///   - removeDimensions:  (Optional) An array of dimension that will be removed from the slice.  Since start and end tensors cannot be modified for batch graphs, this parameter remains untouched
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, startTensor: String?, endTensor: String?, strideTensor: String?, ignoreStartsOnDimension: [Int] = [], ignoreEndsOnDimensions: [Int] = [], removeDimensions: [Int] = [], name: String? = nil) {
         sliceType = .multipleDimensionsFromTensorsWithSqueeze
@@ -724,7 +770,7 @@ public class Slice : UnaryNode {
             case .singleDimension:
                 if dimension < 0 || dimension >= shape.count { throw MPSGraphDSLErrors.DoesNotContainDimension }
                 let size = Int(truncating: shape[dimension])
-                if (strides.count == 0) {
+                if (strides.count == 0 && size > 0) {
                     if (start > 0) {        //  forwards counting
                         if (length < 1 || (length + start) > size) { throw MPSGraphDSLErrors.SliceExceedsTensorDimensions }
                     }
@@ -745,6 +791,7 @@ public class Slice : UnaryNode {
        }
 
         //  Add to the graph itself
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
         let result: MPSGraphTensor
         var startMPSTensor: MPSGraphTensor? = nil
         var endMPSTensor: MPSGraphTensor? = nil
@@ -752,11 +799,47 @@ public class Slice : UnaryNode {
         var sizeMPSTensor: MPSGraphTensor? = nil
         switch (sliceType) {
         case .singleDimension:
-            result = graph.mpsgraph.sliceTensor(inputTensor, dimension: dimension, start:  start, length: length, name: graph.getFullName(name))
+            let adjustedDimension = adjust ? dimension+1 : dimension
+            result = graph.mpsgraph.sliceTensor(inputTensor, dimension: adjustedDimension, start:  start, length: length, name: graph.getFullName(name))
         case .multipleDimensions:
-            result = graph.mpsgraph.sliceTensor(inputTensor, starts: starts.map { NSNumber(value: $0) }, ends: ends.map { NSNumber(value: $0) }, strides: strides.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+            let adjustedStarts: [Int]
+            let adjustedEnds: [Int]
+            let adjustedStrides: [Int]
+            if adjust {
+                adjustedStarts = [0] + starts
+                adjustedEnds = [graph.batchSize] + ends
+                adjustedStrides = [1] + strides
+            }
+            else {
+                adjustedStarts = starts
+                adjustedEnds = ends
+                adjustedStrides = strides
+            }
+            result = graph.mpsgraph.sliceTensor(inputTensor, starts: adjustedStarts.map { NSNumber(value: $0) }, ends: adjustedEnds.map { NSNumber(value: $0) }, strides: adjustedStrides.map { NSNumber(value: $0) }, name: graph.getFullName(name))
         case .multipleDimensionsWithSqueeze:
-            result = graph.mpsgraph.sliceTensor(inputTensor, starts: starts.map { NSNumber(value: $0) }, ends: ends.map { NSNumber(value: $0) }, strides: strides.map { NSNumber(value: $0) }, startMask: startMask, endMask: endMask, squeezeMask: squeezeMask, name: graph.getFullName(name))
+            let adjustedStarts: [Int]
+            let adjustedEnds: [Int]
+            let adjustedStrides: [Int]
+            let adjustedStartMask: UInt32
+            let adjustedEndMask: UInt32
+            let adjustedSqueezeMask: UInt32
+            if adjust {
+                adjustedStarts = [0] + starts
+                adjustedEnds = [graph.batchSize] + ends
+                adjustedStrides = [1] + strides
+                adjustedStartMask = startMask * 2
+                adjustedEndMask = endMask * 2
+                adjustedSqueezeMask = squeezeMask * 2
+            }
+            else {
+                adjustedStarts = starts
+                adjustedEnds = ends
+                adjustedStrides = strides
+                adjustedStartMask = startMask
+                adjustedEndMask = endMask
+                adjustedSqueezeMask = squeezeMask
+            }
+            result = graph.mpsgraph.sliceTensor(inputTensor, starts: adjustedStarts.map { NSNumber(value: $0) }, ends: adjustedEnds.map { NSNumber(value: $0) }, strides: adjustedStrides.map { NSNumber(value: $0) }, startMask: adjustedStartMask, endMask: adjustedEndMask, squeezeMask: adjustedSqueezeMask, name: graph.getFullName(name))
         case .multipleDimensionsFromTensorsWithSqueeze:
             startMPSTensor = try graph.getOptionalTensor(startTensor)
             endMPSTensor = try graph.getOptionalTensor(endTensor)
@@ -782,7 +865,7 @@ public class Sort : UnaryNode {
     /// Constructor for a sort operation on a tensor with a specified axis
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The axis index along which the tensor will be sorted
+    ///   - axis: The axis index along which the tensor will be sorted.  Adjusted for batch if adjustAxesForBatch is true
     ///   - descending: (Optional) If true the tensor is sorted in descending order.  Default is false
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, axis: Int, descending: Bool = false, name: String? = nil) {
@@ -811,9 +894,13 @@ public class Sort : UnaryNode {
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
+        //  Get the batch adjusted axis
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+        let adjustedAxis = adjust ? axis+1 : axis
+
         //  Make sure the specified dimension works with the parameters
         if let shape = inputTensor.shape {
-            if (axis < 0 || axis > shape.count) { throw MPSGraphDSLErrors.DoesNotContainDimension }
+            if (adjustedAxis < 0 || adjustedAxis > shape.count) { throw MPSGraphDSLErrors.DoesNotContainDimension }
         }
         
         //  Add the node to the graph
@@ -829,10 +916,10 @@ public class Sort : UnaryNode {
         }
         else {
             if (descending) {
-                result = graph.mpsgraph.sort(inputTensor, axis: axis, descending: descending, name: graph.getFullName(name))
+                result = graph.mpsgraph.sort(inputTensor, axis: adjustedAxis, descending: descending, name: graph.getFullName(name))
             }
             else {
-                result = graph.mpsgraph.sort(inputTensor, axis: axis, name: graph.getFullName(name))
+                result = graph.mpsgraph.sort(inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
             }
         }
         
@@ -864,7 +951,7 @@ public class Reduction : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - op: The reduction operation to be done
-    ///   - axis: The axis index along which the tensor cumulation will be done
+    ///   - axis: The axis index along which the tensor reduction will be done.  Adjusted for batch if adjustAxesForBatch is true
     ///   - propogateNaNs: (Optional) If true NaN values will be propogated, otherwise ignored.  Defaults to false
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, op: ReductionOperation, axis: Int, propogateNaNs: Bool = false, name: String? = nil) {
@@ -887,7 +974,7 @@ public class Reduction : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - op: The reduction operation to be done
-    ///   - axes: An array of axis indices along which the reduction operation will be performed
+    ///   - axes: An array of axis indices along which the reduction operation will be performed.  Adjusted for batch if adjustAxesForBatch is true
     ///   - propogateNaNs: (Optional) If true NaN values will be propogated, otherwise ignored.  Defaults to false
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, op: ReductionOperation, axes: [Int], propogateNaNs: Bool = false, name: String? = nil) {
@@ -916,77 +1003,82 @@ public class Reduction : UnaryNode {
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
+        //  Get the batch adjusted axis
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+        let adjustedAxis = adjust ? axis+1 : axis
+        let adjustedAxes = axes.map { adjust ? $0+1 : $0 }
+
         let result: MPSGraphTensor
         switch (op) {
             case .and:
                 if multipleAxes {
-                    result = graph.mpsgraph.reductionAnd(with: inputTensor, axes: axes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+                    result = graph.mpsgraph.reductionAnd(with: inputTensor, axes: adjustedAxes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
 
                 }
                 else {
-                    result = graph.mpsgraph.reductionAnd(with: inputTensor, axis: axis, name: graph.getFullName(name))
+                    result = graph.mpsgraph.reductionAnd(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                 }
             case .argmax:
-                result = graph.mpsgraph.reductionArgMaximum(with: inputTensor, axis: axis, name: graph.getFullName(name))
+                result = graph.mpsgraph.reductionArgMaximum(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
             case .argmin:
-                result = graph.mpsgraph.reductionArgMinimum(with: inputTensor, axis: axis, name: graph.getFullName(name))
+                result = graph.mpsgraph.reductionArgMinimum(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
             case .max:
                 if multipleAxes {
                     if (propogateNaNs) {
-                        result = graph.mpsgraph.reductionMaximumPropagateNaN(with: inputTensor, axes: axes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+                        result = graph.mpsgraph.reductionMaximumPropagateNaN(with: inputTensor, axes: adjustedAxes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
                     }
                     else {
-                        result = graph.mpsgraph.reductionMaximum(with: inputTensor, axes: axes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+                        result = graph.mpsgraph.reductionMaximum(with: inputTensor, axes: adjustedAxes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
                     }
                 }
                 else {
                     if (propogateNaNs) {
-                        result = graph.mpsgraph.reductionMaximumPropagateNaN(with: inputTensor, axis: axis, name: graph.getFullName(name))
+                        result = graph.mpsgraph.reductionMaximumPropagateNaN(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                     }
                     else {
-                        result = graph.mpsgraph.reductionMaximum(with: inputTensor, axis: axis, name: graph.getFullName(name))
+                        result = graph.mpsgraph.reductionMaximum(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                     }
                 }
             case .min:
                 if multipleAxes {
                     if (propogateNaNs) {
-                        result = graph.mpsgraph.reductionMinimumPropagateNaN(with: inputTensor, axes: axes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+                        result = graph.mpsgraph.reductionMinimumPropagateNaN(with: inputTensor, axes: adjustedAxes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
                     }
                     else {
-                        result = graph.mpsgraph.reductionMinimum(with: inputTensor, axes: axes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+                        result = graph.mpsgraph.reductionMinimum(with: inputTensor, axes: adjustedAxes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
                     }
                 }
                 else {
                     if (propogateNaNs) {
-                        result = graph.mpsgraph.reductionMinimumPropagateNaN(with: inputTensor, axis: axis, name: graph.getFullName(name))
+                        result = graph.mpsgraph.reductionMinimumPropagateNaN(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                     }
                     else {
-                        result = graph.mpsgraph.reductionMinimum(with: inputTensor, axis: axis, name: graph.getFullName(name))
+                        result = graph.mpsgraph.reductionMinimum(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                     }
                 }
             case .or:
                 if multipleAxes {
-                    result = graph.mpsgraph.reductionOr(with: inputTensor, axes: axes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+                    result = graph.mpsgraph.reductionOr(with: inputTensor, axes: adjustedAxes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
 
                 }
                 else {
-                    result = graph.mpsgraph.reductionOr(with: inputTensor, axis: axis, name: graph.getFullName(name))
+                    result = graph.mpsgraph.reductionOr(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                 }
             case .product:
                 if multipleAxes {
-                    result = graph.mpsgraph.reductionProduct(with: inputTensor, axes: axes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+                    result = graph.mpsgraph.reductionProduct(with: inputTensor, axes: adjustedAxes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
 
                 }
                 else {
-                    result = graph.mpsgraph.reductionProduct(with: inputTensor, axis: axis, name: graph.getFullName(name))
+                    result = graph.mpsgraph.reductionProduct(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                 }
             case .sum:
                 if multipleAxes {
-                    result = graph.mpsgraph.reductionSum(with: inputTensor, axes: axes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+                    result = graph.mpsgraph.reductionSum(with: inputTensor, axes: adjustedAxes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
 
                 }
                 else {
-                    result = graph.mpsgraph.reductionSum(with: inputTensor, axis: axis, name: graph.getFullName(name))
+                    result = graph.mpsgraph.reductionSum(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                 }
        }
         
@@ -1017,7 +1109,7 @@ public class Cumulate : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - op: The cumulation operation to be done
-    ///   - axis: The axis index along which the tensor cumulation will be done
+    ///   - axis: The axis index along which the tensor cumulation will be done.  Adjusted for batch if adjustAxesForBatch is true
     ///   - exclusive: (Optional) If true performs the exclusive cumulative operation.  Defaults to false.  First element will be minimum value for max operation, maximum value for min opertion, 0 for sum, and 1 for product
     ///   - reverse: (Optional)  If true the cumulation operation runs in reverse.  Defaults to false
     ///   - name: (Optional) The name for this node and its associated tensor
@@ -1057,6 +1149,10 @@ public class Cumulate : UnaryNode {
         if (useTensorForAxis) {
             axisMPSTensor = try graph.getOptionalTensor(axisTensor)
         }
+        
+        //  Get the batch adjusted axis
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+        let adjustedAxis = adjust ? axis+1 : axis
 
         //  Add to the graph itself
         let result: MPSGraphTensor
@@ -1072,10 +1168,10 @@ public class Cumulate : UnaryNode {
                 }
                 else {
                     if (exclusive || reverse) {
-                        result = graph.mpsgraph.cumulativeMaximum(inputTensor, axis: axis, exclusive: exclusive, reverse: reverse, name: graph.getFullName(name))
+                        result = graph.mpsgraph.cumulativeMaximum(inputTensor, axis: adjustedAxis, exclusive: exclusive, reverse: reverse, name: graph.getFullName(name))
                     }
                     else {
-                        result = graph.mpsgraph.cumulativeMaximum(inputTensor, axis: axis, name: graph.getFullName(name))
+                        result = graph.mpsgraph.cumulativeMaximum(inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                     }
                 }
             case .min:
@@ -1089,10 +1185,10 @@ public class Cumulate : UnaryNode {
                 }
                 else {
                     if (exclusive || reverse) {
-                        result = graph.mpsgraph.cumulativeMinimum(inputTensor, axis: axis, exclusive: exclusive, reverse: reverse, name: graph.getFullName(name))
+                        result = graph.mpsgraph.cumulativeMinimum(inputTensor, axis: adjustedAxis, exclusive: exclusive, reverse: reverse, name: graph.getFullName(name))
                     }
                     else {
-                        result = graph.mpsgraph.cumulativeMinimum(inputTensor, axis: axis, name: graph.getFullName(name))
+                        result = graph.mpsgraph.cumulativeMinimum(inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                     }
                 }
             case .product:
@@ -1106,10 +1202,10 @@ public class Cumulate : UnaryNode {
                 }
                 else {
                     if (exclusive || reverse) {
-                        result = graph.mpsgraph.cumulativeProduct(inputTensor, axis: axis, exclusive: exclusive, reverse: reverse, name: graph.getFullName(name))
+                        result = graph.mpsgraph.cumulativeProduct(inputTensor, axis: adjustedAxis, exclusive: exclusive, reverse: reverse, name: graph.getFullName(name))
                     }
                     else {
-                        result = graph.mpsgraph.cumulativeProduct(inputTensor, axis: axis, name: graph.getFullName(name))
+                        result = graph.mpsgraph.cumulativeProduct(inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                     }
                 }
             case .sum:
@@ -1123,10 +1219,10 @@ public class Cumulate : UnaryNode {
                 }
                 else {
                     if (exclusive || reverse) {
-                        result = graph.mpsgraph.cumulativeSum(inputTensor, axis: axis, exclusive: exclusive, reverse: reverse, name: graph.getFullName(name))
+                        result = graph.mpsgraph.cumulativeSum(inputTensor, axis: adjustedAxis, exclusive: exclusive, reverse: reverse, name: graph.getFullName(name))
                     }
                     else {
-                        result = graph.mpsgraph.cumulativeSum(inputTensor, axis: axis, name: graph.getFullName(name))
+                        result = graph.mpsgraph.cumulativeSum(inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
                     }
                 }
         }
@@ -1144,7 +1240,7 @@ public class TileTensor : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - multipliers: The number of times the tensor is tiled for each dimension
+    ///   - multipliers: The number of times the tensor is tiled for each dimension.  Adjusted for batch if batch dimension not already included in multiplier list
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, multipliers: [Int], name: String? = nil) {
         self.multipliers = multipliers
@@ -1156,14 +1252,24 @@ public class TileTensor : UnaryNode {
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
         //  If make sure the number of multipliers match the number of dimensions
+        var adjustMultipliersForBatch = false
         if let incomingShape = inputTensor.shape {
-            if (incomingShape.count != multipliers.count) {
+            if (incomingShape.count != multipliers.count && (incomingShape.count != multipliers.count+1 || !graph.batchGraph)) {
                 throw MPSGraphDSLErrors.EntryRequiredForEachDimensions
             }
+            if (incomingShape.count == multipliers.count+1 && graph.batchGraph) { adjustMultipliersForBatch = true }
+        }
+        
+        //  Adjust the multipliers for batch if needed
+        let adjustedMultipliers: [Int]
+        if (adjustMultipliersForBatch) {
+            adjustedMultipliers = [1] + multipliers
+        } else {
+            adjustedMultipliers = multipliers
         }
 
         //  Add to the graph itself
-        let tileResult = graph.mpsgraph.tileTensor(inputTensor, withMultiplier: multipliers.map { NSNumber(value: $0)}, name: graph.getFullName(name))
+        let tileResult = graph.mpsgraph.tileTensor(inputTensor, withMultiplier: adjustedMultipliers.map { NSNumber(value: $0)}, name: graph.getFullName(name))
         
         //  Remember the output tensor and shape for later
         return [tileResult]
@@ -1258,7 +1364,7 @@ public class Squeeze : UnaryNode {
     let axes: [Int]
     let axesTensor: String?
 
-    ///  Constructor for a squeezing operation
+    ///  Constructor for a squeezing operation of axis 0.  Adjusted for batch if adjustAxesForBatch is true
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
@@ -1275,7 +1381,7 @@ public class Squeeze : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The axis to squeeze out.  Must have size 1
+    ///   - axis: The axis to squeeze out.  Must have size 1.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, axis: Int, name: String? = nil) {
         squeezeType = .oneDimension
@@ -1289,7 +1395,7 @@ public class Squeeze : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axes: an array of axes to squeeze out.  All must have size 1
+    ///   - axes: an array of axes to squeeze out.  All must have size 1.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, axes: [Int], name: String? = nil) {
         squeezeType = .multipleDimensions
@@ -1317,15 +1423,24 @@ public class Squeeze : UnaryNode {
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+
         //  Add to the graph itself
         let squeezeResult: MPSGraphTensor
         switch (squeezeType) {
         case .allDimensions:
             squeezeResult = graph.mpsgraph.squeeze(inputTensor, name: graph.getFullName(name))
         case .oneDimension:
-            squeezeResult = graph.mpsgraph.squeeze(inputTensor, axis: axis, name: graph.getFullName(name))
+            //  Get the batch adjusted axis
+            let adjustedAxis = adjust ? axis+1 : axis
+            squeezeResult = graph.mpsgraph.squeeze(inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
         case .multipleDimensions:
-            squeezeResult = graph.mpsgraph.squeeze(inputTensor, axes: axes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
+            if (adjust) {
+                squeezeResult = graph.mpsgraph.squeeze(inputTensor, axes: axes.map { NSNumber(value: $0 + 1)}, name: graph.getFullName(name))
+            }
+            else {
+                squeezeResult = graph.mpsgraph.squeeze(inputTensor, axes: axes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
+            }
         case .multipleDimensionsFromTensor:
             let squeezeMPSTensor = try graph.getOptionalTensor(axesTensor)
             squeezeResult = graph.mpsgraph.squeeze(inputTensor, axesTensor: squeezeMPSTensor, name: graph.getFullName(name))
@@ -1338,10 +1453,10 @@ public class Squeeze : UnaryNode {
 
 ///   Node to perform a Bottom-K operation on a tensor
 public class BottomK : UnaryNode {
-    let axis : Int
-    let k : Int
-    let axisTensorName : String?
-    let kTensorName : String?
+    let axis: Int
+    let k: Int
+    let axisTensorName: String?
+    let kTensorName: String?
     let useTensors: Bool
     
     var suffixes: [String] = []
@@ -1350,7 +1465,7 @@ public class BottomK : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The index of the axis that the operation will be performed on
+    ///   - axis: The index of the axis that the operation will be performed on.  Adjusted for batch if adjustAxesForBatch is true
     ///   - k:  The number of lowest values that will be kept
     ///   - name: (Optional) The name for this node .  The associated tensors will have "_values" and "_indices" appended
     public init(_ input: String? = nil, axis: Int, k: Int, name: String? = nil) {
@@ -1394,15 +1509,19 @@ public class BottomK : UnaryNode {
             results = graph.mpsgraph.bottomK(inputTensor, axisTensor: axisMPSTensor, kTensor: kMPSTensor, name: graph.getFullName(name))
         }
         else {
+            //  Get the batch adjusted axis
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+            let adjustedAxis = adjust ? axis+1 : axis
+
             //  If make sure the axis specified fits
             if let incomingShape = inputTensor.shape {
-                if (axis < 0 || axis >= incomingShape.count) {
+                if (adjustedAxis < 0 || adjustedAxis >= incomingShape.count) {
                     throw GenericMPSGraphDSLErrors.InvalidDimension
                 }
             }
             
             //  Add to the graph itself
-            results = graph.mpsgraph.bottomK(inputTensor, axis: axis, k: k, name: graph.getFullName(name))
+            results = graph.mpsgraph.bottomK(inputTensor, axis: adjustedAxis, k: k, name: graph.getFullName(name))
         }
         
         //  Set up the suffixes
@@ -1419,10 +1538,10 @@ public class BottomK : UnaryNode {
 
 ///   Node to perform a Top-K operation on a tensor
 public class TopK : UnaryNode {
-    let axis : Int
-    let k : Int
-    let axisTensorName : String?
-    let kTensorName : String?
+    let axis: Int
+    let k: Int
+    let axisTensorName: String?
+    let kTensorName: String?
     let useTensors: Bool
     
     var suffixes: [String] = []
@@ -1431,8 +1550,8 @@ public class TopK : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The index of the axis that the operation will be performed on
-    ///   - k:  The number of lowest values that will be kept
+    ///   - axis: The index of the axis that the operation will be performed on.  Adjusted for batch if adjustAxesForBatch is true
+    ///   - k:  The number of highest values that will be kept
     ///   - name: (Optional) The name for this node .  The associated tensors will have "_values" and "_indices" appended
     public init(_ input: String? = nil, axis: Int, k: Int, name: String? = nil) {
         self.axis = axis
@@ -1448,7 +1567,7 @@ public class TopK : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - axisTensor: (Optional) The name of a node tensor that provides the index of the axis that the operation will be performed on.  If nil the previous node's output will be used
-    ///   - kTensor:  (Optional) The name of a node tensor that provides the number of lowest values that will be kept.  If nil the previous node's output will be used
+    ///   - kTensor:  (Optional) The name of a node tensor that provides the number of highest values that will be kept.  If nil the previous node's output will be used
     ///   - name: (Optional) The name for this node .  The associated tensors will have "_values" and "_indices" appended
     public init(_ input: String? = nil, axisTensor: String? = nil, kTensor: String? = nil, name: String? = nil) {
         self.axis = 0
@@ -1463,7 +1582,7 @@ public class TopK : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The index of the axis that the operation will be performed on
+    ///   - k:  The number of highest values that will be kept
     ///   - name: (Optional) The name for this node .  The associated tensors will have "_values" and "_indices" appended
     public init(_ input: String? = nil, k: Int, name: String? = nil) {
         self.axis = -1
@@ -1511,16 +1630,20 @@ public class TopK : UnaryNode {
             }
         }
         else {
+            //  Get the batch adjusted axis
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+            let adjustedAxis = adjust ? axis+1 : axis
+
             //  If make sure the axis specified fits
             if let incomingShape = inputTensor.shape {
-                if (axis < 0 || axis >= incomingShape.count) {
+                if (adjustedAxis < 0 || adjustedAxis >= incomingShape.count) {
                     throw GenericMPSGraphDSLErrors.InvalidDimension
                 }
             }
             
             //  Add to the graph itself
-            if (k == -1) {
-                results = graph.mpsgraph.topK(inputTensor, axis: axis, k: k, name: graph.getFullName(name))
+            if (axis == -1) {
+                results = graph.mpsgraph.topK(inputTensor, axis: adjustedAxis, k: k, name: graph.getFullName(name))
             }
             else {
                 results = graph.mpsgraph.topK(inputTensor, k: k, name: graph.getFullName(name))
@@ -1555,7 +1678,7 @@ public class ExpandDimension : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The index of the axis that the operation will be performed on
+    ///   - axis: The index of the axis that the operation will be performed on.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node .
     public init(_ input: String? = nil, axis: Int, name: String? = nil) {
         self.axis = axis
@@ -1568,7 +1691,7 @@ public class ExpandDimension : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The index of the axis that the operation will be performed on
+    ///   - axes: The array of indices for the axes that the operation will be performed on.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node .
     public init(_ input: String? = nil, axes: [Int], name: String? = nil) {
         self.axis = 0
@@ -1599,25 +1722,33 @@ public class ExpandDimension : UnaryNode {
         let result: MPSGraphTensor?
         switch expandType {
         case .singleDimension:
+            //  Get the batch adjusted axis
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+            let adjustedAxis = adjust ? axis+1 : axis
+            
             //  If make sure the axis specified fits
             if let incomingShape = inputTensor.shape {
-                if (axis < 0 || axis >= incomingShape.count) {
+                if (adjustedAxis < 0 || adjustedAxis >= incomingShape.count) {
                     throw GenericMPSGraphDSLErrors.InvalidDimension
                 }
             }
 
-            result = graph.mpsgraph.expandDims(inputTensor, axis: axis, name: graph.getFullName(name))
+            result = graph.mpsgraph.expandDims(inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
         case .multipleDimensions:
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
             //  If make sure the axes specified fits
+            var adjustedAxes: [Int] = []
             if let incomingShape = inputTensor.shape {
                 for axis in axes {
-                    if (axis < 0 || axis >= incomingShape.count) {
+                    let adjustedAxis = adjust ? axis+1 : axis
+                    if (adjustedAxis < 0 || adjustedAxis >= incomingShape.count) {
                         throw GenericMPSGraphDSLErrors.InvalidDimension
                     }
+                    adjustedAxes.append(adjustedAxis)
                 }
             }
 
-            result = graph.mpsgraph.expandDims(inputTensor, axes: axes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
+            result = graph.mpsgraph.expandDims(inputTensor, axes: adjustedAxes.map { NSNumber(value: $0) }, name: graph.getFullName(name))
         case .multipleDimensionsFromTensor:
             //  Get the axes tensor
             let axesMPSTensor = try graph.getOptionalTensor(axesTensorName)
@@ -1700,7 +1831,7 @@ public class ArgSort : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The axis along which the tensors sort indices will be found
+    ///   - axis: The axis along which the tensors sort indices will be found.  Adjusted for batch if adjustAxesForBatch is true
     ///   - descending: (Optional) If true the sort is performed in descending order.  Defaults to false
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, axis: Int, descending: Bool = false, name: String? = nil) {
@@ -1737,7 +1868,11 @@ public class ArgSort : UnaryNode {
             result = graph.mpsgraph.argSort(inputTensor, axisTensor: axisMPSTensor, descending: descending, name: graph.getFullName(name))
        }
         else {
-            result = graph.mpsgraph.argSort(inputTensor, axis: axis, descending: descending, name: graph.getFullName(name))
+            //  Get the batch adjusted axis
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+            let adjustedAxis = adjust ? axis+1 : axis
+
+            result = graph.mpsgraph.argSort(inputTensor, axis: adjustedAxis, descending: descending, name: graph.getFullName(name))
         }
         
         //  Remember the output tensor and shape for later
@@ -1816,7 +1951,7 @@ public class Flatten2D : UnaryNode {
     /// Create a flatten to 2D operation along the given axis
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: The axis for the operation.  Flattens dimensions before axis to dimension 0 (rows)  and dimensions starting from axis to dimension 1 (columns)
+    ///   - axis: The axis for the operation.  Flattens dimensions before axis to dimension 0 (rows)  and dimensions starting from axis to dimension 1 (columns).  (not adjusted for batch)
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, axis: Int, name: String? = nil) {
         self.axis = axis
@@ -1872,7 +2007,7 @@ public class OneHot : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - depth: The depth of the one-hot (number of values that create the one-hot representation
-    ///   - axis: (Optional) The axis along which the indices are found - which is expanded to the depth parameter.  If nil the new axis will be the new minor dimension.  Default is nil
+    ///   - axis: (Optional) The axis along which the indices are found - which is expanded to the depth parameter.  If nil the new axis will be the new minor dimension.  Default is nil.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, depth: Int, axis: Int? = nil, name: String? = nil) {
         self.depth = depth
@@ -1889,7 +2024,7 @@ public class OneHot : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - depth: The depth of the one-hot (number of values that create the one-hot representation
-    ///   - axis: (Optional) The axis along which the indices are found - which is expanded to the depth parameter.  If nil the new axis will be the new minor dimension.  Default is nil
+    ///   - axis: (Optional) The axis along which the indices are found - which is expanded to the depth parameter.  If nil the new axis will be the new minor dimension.  Default is nil.  Adjusted for batch if adjustAxesForBatch is true
     ///   - dataType: The element type of the resulting tensor
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, depth: Int, axis: Int? = nil, dataType: DataType, name: String? = nil) {
@@ -1907,7 +2042,7 @@ public class OneHot : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - depth: The depth of the one-hot (number of values that create the one-hot representation
-    ///   - axis: (Optional) The axis along which the indices are found - which is expanded to the depth parameter.  If nil the new axis will be the new minor dimension.  Default is nil
+    ///   - axis: (Optional) The axis along which the indices are found - which is expanded to the depth parameter.  If nil the new axis will be the new minor dimension.  Default is nil.  Adjusted for batch if adjustAxesForBatch is true
     ///   - dataType: The element type of the resulting tensor
     ///   - onValue: The element value for a 'on' state in the one-hot
     ///   - offValue: The element value for a 'of' state in the one-hot
@@ -1932,7 +2067,11 @@ public class OneHot : UnaryNode {
         if (haveDataType) {
             if (haveValues) {
                 if let axis = axis {
-                    result = graph.mpsgraph.oneHot(withIndicesTensor: inputTensor, depth: depth, axis: axis, dataType: dataType.getMPSDataType(), onValue: onValue, offValue: offValue, name: graph.getFullName(name))
+                    //  Get the batch adjusted axis
+                    let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+                    let adjustedAxis = adjust ? axis+1 : axis
+
+                    result = graph.mpsgraph.oneHot(withIndicesTensor: inputTensor, depth: depth, axis: adjustedAxis, dataType: dataType.getMPSDataType(), onValue: onValue, offValue: offValue, name: graph.getFullName(name))
                 }
                 else {
                     result = graph.mpsgraph.oneHot(withIndicesTensor: inputTensor, depth: depth, dataType: dataType.getMPSDataType(), onValue: onValue, offValue: offValue, name: graph.getFullName(name))
@@ -1940,7 +2079,11 @@ public class OneHot : UnaryNode {
             }
             else {
                 if let axis = axis {
-                    result = graph.mpsgraph.oneHot(withIndicesTensor: inputTensor, depth: depth, axis: axis, dataType: dataType.getMPSDataType(), name: graph.getFullName(name))
+                    //  Get the batch adjusted axis
+                    let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+                    let adjustedAxis = adjust ? axis+1 : axis
+
+                    result = graph.mpsgraph.oneHot(withIndicesTensor: inputTensor, depth: depth, axis: adjustedAxis, dataType: dataType.getMPSDataType(), name: graph.getFullName(name))
                 }
                 else {
                     result = graph.mpsgraph.oneHot(withIndicesTensor: inputTensor, depth: depth, dataType: dataType.getMPSDataType(), name: graph.getFullName(name))
@@ -1949,7 +2092,11 @@ public class OneHot : UnaryNode {
         }
         else {
             if let axis = axis {
-                result = graph.mpsgraph.oneHot(withIndicesTensor: inputTensor, depth: depth, axis: axis, name: graph.getFullName(name))
+                //  Get the batch adjusted axis
+                let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+                let adjustedAxis = adjust ? axis+1 : axis
+
+                result = graph.mpsgraph.oneHot(withIndicesTensor: inputTensor, depth: depth, axis: adjustedAxis, name: graph.getFullName(name))
             }
             else {
                 result = graph.mpsgraph.oneHot(withIndicesTensor: inputTensor, depth: depth, name: graph.getFullName(name))
@@ -2048,7 +2195,7 @@ public class Quantize : UnaryNode {
     ///   - scaleTensor: (Optional)  The name of the tensor that will provide the scale parameter:  result = (value / scale) + zeroPoint.  If nil the previous node's output will be used
     ///   - zeroPoint: bias parameter:   result = (value / scale) + zeroPoint
     ///   - signed: (Optional) If true a signed byte tensor is produces, else unsigned.  Default is false (UInt8)
-    ///   - axis: Axis on which the scale 1D value is being broadcasted
+    ///   - axis: Axis on which the scale 1D value is being broadcasted.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, scaleTensor: String? = nil, zeroPoint: Double, signed: Bool = false, axis: Int, name: String? = nil) {
         self.scale = 0.0
@@ -2068,7 +2215,7 @@ public class Quantize : UnaryNode {
     ///   - scaleTensor: (Optional)  The name of the tensor that will provide the scale parameter:  result = (value / scale) + zeroPoint.  If nil the previous node's output will be used
     ///   - zeroPointTensor: (Optional)  The name of the tensor that will provide the zero Point value.  bias parameter:   result = (value / scale) + zeroPoint.   If nil the previous node's output will be used
     ///   - signed: (Optional) If true a signed byte tensor is produces, else unsigned.  Default is false (UInt8)
-    ///   - axis: Axis on which the scale 1D value is being broadcasted
+    ///   - axis: Axis on which the scale 1D value is being broadcasted.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, scaleTensor: String? = nil, zeroPointTensor: String? = nil, signed: Bool = false, axis: Int, name: String? = nil) {
         self.scale = 0.0
@@ -2089,14 +2236,18 @@ public class Quantize : UnaryNode {
         //  Add to the graph itself
         let result: MPSGraphTensor
         if (useScaleTensor) {
+            //  Get the batch adjusted axis
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+            let adjustedAxis = adjust ? axis+1 : axis
+
             let scaleMPSTensor = try graph.getOptionalTensor(scaleTensor)
             if (useZeroPointTensor) {
                 let zeroPointMPSTensor = try graph.getOptionalTensor(zeroPointTensor)
-                result = graph.mpsgraph.quantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPointTensor: zeroPointMPSTensor, dataType: signed ? .int8 : .uInt8, axis: axis, name: graph.getFullName(name))
+                result = graph.mpsgraph.quantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPointTensor: zeroPointMPSTensor, dataType: signed ? .int8 : .uInt8, axis: adjustedAxis, name: graph.getFullName(name))
 
             }
             else {
-                result = graph.mpsgraph.quantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPoint: zeroPoint, dataType: signed ? .int8 : .uInt8, axis: axis, name: graph.getFullName(name))
+                result = graph.mpsgraph.quantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPoint: zeroPoint, dataType: signed ? .int8 : .uInt8, axis: adjustedAxis, name: graph.getFullName(name))
 
             }
         }
@@ -2145,7 +2296,7 @@ public class Dequantize : UnaryNode {
     ///   - scaleTensor: (Optional)  The name of the tensor that will provide the scale parameter:  result = (value / scale) + zeroPoint.  If nil the previous node's output will be used
     ///   - zeroPoint: bias parameter:   result = (value / scale) + zeroPoint.  Not used if axis not provided
     ///   - dataType: The type of returned tensor
-    ///   - axis: (Optional) Axis on which the scale 1D value was broadcasted
+    ///   - axis: (Optional) Axis on which the scale 1D value was broadcasted.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, scaleTensor: String? = nil, zeroPoint: Double, dataType: DataType, axis: Int? = nil, name: String? = nil) {
         self.scale = 0.0
@@ -2165,7 +2316,7 @@ public class Dequantize : UnaryNode {
     ///   - scaleTensor: (Optional)  The name of the tensor that will provide the scale parameter:  result = (value / scale) + zeroPoint.  If nil the previous node's output will be used
     ///   - zeroPointTensor: (Optional)  The name of the tensor that will provide the zero Point value.  bias parameter:   result = (value / scale) + zeroPoint.   If nil the previous node's output will be used
     ///   - dataType: The type of returned tensor
-    ///   - axis: (Optional) Axis on which the scale 1D value was broadcasted
+    ///   - axis: (Optional) Axis on which the scale 1D value was broadcasted.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(_ input: String? = nil, scaleTensor: String? = nil, zeroPointTensor: String? = nil, dataType: DataType, axis: Int? = nil, name: String? = nil) {
         self.scale = 0.0
@@ -2190,7 +2341,11 @@ public class Dequantize : UnaryNode {
             if (useZeroPointTensor) {
                 let zeroPointMPSTensor = try graph.getOptionalTensor(zeroPointTensor)
                 if let axis = axis {
-                    result = graph.mpsgraph.dequantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPointTensor: zeroPointMPSTensor, dataType: dataType.getMPSDataType(), axis: axis, name: graph.getFullName(name))
+                    //  Get the batch adjusted axis
+                    let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+                    let adjustedAxis = adjust ? axis+1 : axis
+
+                    result = graph.mpsgraph.dequantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPointTensor: zeroPointMPSTensor, dataType: dataType.getMPSDataType(), axis: adjustedAxis, name: graph.getFullName(name))
                 }
                 else {
                     result = graph.mpsgraph.dequantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPointTensor: zeroPointMPSTensor, dataType: dataType.getMPSDataType(), name: graph.getFullName(name))
@@ -2198,7 +2353,11 @@ public class Dequantize : UnaryNode {
             }
             else {
                 if let axis = axis {
-                    result = graph.mpsgraph.dequantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPoint: zeroPoint, dataType: dataType.getMPSDataType(), axis: axis, name: graph.getFullName(name))
+                    //  Get the batch adjusted axis
+                    let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+                    let adjustedAxis = adjust ? axis+1 : axis
+
+                    result = graph.mpsgraph.dequantize(inputTensor, scaleTensor: scaleMPSTensor, zeroPoint: zeroPoint, dataType: dataType.getMPSDataType(), axis: adjustedAxis, name: graph.getFullName(name))
                 }
                 else {
                     result = graph.mpsgraph.dequantize(inputTensor, scaleTensor: scaleMPSTensor, dataType: dataType.getMPSDataType(), name: graph.getFullName(name))
@@ -2255,9 +2414,9 @@ public class DepthToSpace2D : UnaryNode {
     /// 
     ///  - Parameters:
     ///  - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - widthAxis: The axis that defines the fastest running dimension within the block
-    ///   - heightAxis: The axis that defines the 2nd fastest running dimension within the block
-    ///   - depthAxis: The axis that defines the destination dimension, where to copy the blocks
+    ///   - widthAxis: The axis that defines the fastest running dimension within the block.  Adjusted for batch if adjustAxesForBatch is true
+    ///   - heightAxis: The axis that defines the 2nd fastest running dimension within the block.  Adjusted for batch if adjustAxesForBatch is true
+    ///   - depthAxis: The axis that defines the destination dimension, where to copy the blocks.  Adjusted for batch if adjustAxesForBatch is true
     ///   - blockSize: The size of the square spatial sub-block
     ///   - usePixelShuffleOrder: (Optional) A parameter that controls the layout of the sub-blocks within the depth dimension.  Default is false
     ///  - name: (Optional) The name for this node and its associated tensor
@@ -2316,8 +2475,14 @@ public class DepthToSpace2D : UnaryNode {
 
         }
         else {
+            //  Get the batch adjusted axes
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+            let adjustedWidthAxis = adjust ? widthAxis+1 : widthAxis
+            let adjustedHeightAxis = adjust ? heightAxis+1 : heightAxis
+            let adjustedDepthAxis = adjust ? depthAxis+1 : depthAxis
+
             //  Add the node
-            let result = graph.mpsgraph.depth(toSpace2DTensor: inputTensor, widthAxis: widthAxis, heightAxis: heightAxis, depthAxis: depthAxis, blockSize: blockSize, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
+            let result = graph.mpsgraph.depth(toSpace2DTensor: inputTensor, widthAxis: adjustedWidthAxis, heightAxis: adjustedHeightAxis, depthAxis: adjustedDepthAxis, blockSize: blockSize, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
             
             //  Remember the output tensor and shape for later
             return [result]
@@ -2341,9 +2506,9 @@ public class SpaceToDepth2D : UnaryNode {
     ///
     ///  - Parameters:
     ///  - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - widthAxis: The axis that defines the fastest running dimension within the block
-    ///   - heightAxis: The axis that defines the 2nd fastest running dimension within the block
-    ///   - depthAxis: The axis that defines the destination dimension, where to copy the blocks
+    ///   - widthAxis: The axis that defines the fastest running dimension within the block.  Adjusted for batch if adjustAxesForBatch is true
+    ///   - heightAxis: The axis that defines the 2nd fastest running dimension within the block.  Adjusted for batch if adjustAxesForBatch is true
+    ///   - depthAxis: The axis that defines the destination dimension, where to copy the blocks.  Adjusted for batch if adjustAxesForBatch is true
     ///   - blockSize: The size of the square spatial sub-block
     ///   - usePixelShuffleOrder: (Optional) A parameter that controls the layout of the sub-blocks within the depth dimension.  Default is false
     ///  - name: (Optional) The name for this node and its associated tensor
@@ -2402,8 +2567,14 @@ public class SpaceToDepth2D : UnaryNode {
 
         }
         else {
+            //  Get the batch adjusted axes
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+            let adjustedWidthAxis = adjust ? widthAxis+1 : widthAxis
+            let adjustedHeightAxis = adjust ? heightAxis+1 : heightAxis
+            let adjustedDepthAxis = adjust ? depthAxis+1 : depthAxis
+
             //  Add the node
-            let result = graph.mpsgraph.space(toDepth2DTensor: inputTensor, widthAxis: widthAxis, heightAxis: heightAxis, depthAxis: depthAxis, blockSize: blockSize, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
+            let result = graph.mpsgraph.space(toDepth2DTensor: inputTensor, widthAxis: adjustedWidthAxis, heightAxis: adjustedHeightAxis, depthAxis: adjustedDepthAxis, blockSize: blockSize, usePixelShuffleOrder: usePixelShuffleOrder, name: graph.getFullName(name))
             
             //  Remember the output tensor and shape for later
             return [result]
@@ -2587,7 +2758,7 @@ public class Gather : BinaryNode {
     /// - Parameters:
     ///   - updateTensor: (Optional) The name of the tensor that will provide the values to be gathered  If nil the previous node's output will be used
     ///   - indicesTensor: (Optional) The name of the tensor that will provide the indices for the gather operation.  Must be an Int32 or Int64 tensor.  If nil the previous node's output will be used
-    ///   - axis: The axis along which the data is gathered.
+    ///   - axis: The axis along which the data is gathered.  Adjusted for batch if adjustAxesForBatch is true
     ///   - numBatchDimensions: (Optional) The number of batch dimensions.  MPSGraph documentation for 'gather' for tensor shape requirements using batch dimensions includes.  Default is nil, meaning no batch dimensions are used in the gather operation
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(updateTensor: String? = nil, indicesTensor: String? = nil, axis: Int, numBatchDimensions: Int? = nil, name: String? = nil) {
@@ -2604,7 +2775,7 @@ public class Gather : BinaryNode {
     /// - Parameters:
     ///   - updateTensor: (Optional) The name of the tensor that will provide the values to be gathered  If nil the previous node's output will be used
     ///   - indicesTensor: (Optional) The name of the tensor that will provide the indices for the gather operation.  Must be a scalar Int32 or Int64 tensor.  If nil the previous node's output will be used
-    ///   - axis: The axis along which the data is gathered.
+    ///   - axis: The axis along which the data is gathered.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(updateTensor: String? = nil, indicesTensor: String? = nil, axisTensor: String? = nil, name: String? = nil) {
         self.axis = 0
@@ -2642,16 +2813,20 @@ public class Gather : BinaryNode {
             result = graph.mpsgraph.gatherAlongAxisTensor(axisMPSTensor, updates: inputTensors.firstInputTensor, indices: inputTensors.secondInputTensor, name: graph.getFullName(name))
         }
         else {
+            //  Get the batch adjusted axis
+            let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+            let adjustedAxis = adjust ? axis+1 : axis
+
             if let numBatchDimensions = numBatchDimensions {
                 if (NDOperation) {
                     result = graph.mpsgraph.gatherND(withUpdatesTensor: inputTensors.firstInputTensor, indicesTensor: inputTensors.secondInputTensor, batchDimensions: numBatchDimensions, name: graph.getFullName(name))
                }
                 else {
-                    result = graph.mpsgraph.gather(withUpdatesTensor: inputTensors.firstInputTensor, indicesTensor: inputTensors.secondInputTensor, axis: axis, batchDimensions: numBatchDimensions, name: graph.getFullName(name))
+                    result = graph.mpsgraph.gather(withUpdatesTensor: inputTensors.firstInputTensor, indicesTensor: inputTensors.secondInputTensor, axis: adjustedAxis, batchDimensions: numBatchDimensions, name: graph.getFullName(name))
                 }
             }
             else {
-                result = graph.mpsgraph.gatherAlongAxis(axis, updates: inputTensors.firstInputTensor, indices: inputTensors.secondInputTensor, name: graph.getFullName(name))
+                result = graph.mpsgraph.gatherAlongAxis(adjustedAxis, updates: inputTensors.firstInputTensor, indices: inputTensors.secondInputTensor, name: graph.getFullName(name))
             }
         }
         

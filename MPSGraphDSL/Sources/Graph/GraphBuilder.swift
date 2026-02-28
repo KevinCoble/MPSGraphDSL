@@ -30,9 +30,9 @@ public enum GraphBuilder {
 
 extension Graph {
     ///  Initializer for a Graph with definition nodes
-    public convenience init(batchSize: Int = 1, buildOptions: BuildOptions = [], @GraphBuilder _ builtNodes: () -> [Node]) {
+    public convenience init(batchSize: Int = 1, adjustAxesForBatch: Bool = true, buildOptions: BuildOptions = [], @GraphBuilder _ builtNodes: () -> [Node]) {
         let nodes = builtNodes()
-        self.init(batchSize: batchSize, buildOptions: buildOptions, nodes: nodes)
+        self.init(batchSize: batchSize, adjustAxesForBatch: adjustAxesForBatch, buildOptions: buildOptions, nodes: nodes)
     }
 }
 

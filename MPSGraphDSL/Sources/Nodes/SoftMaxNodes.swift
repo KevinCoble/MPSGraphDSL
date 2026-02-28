@@ -12,12 +12,12 @@ import MetalPerformanceShadersGraph
 
 ///   Node to perform a softmax operation
 public class SoftMax : UnaryNode {
-    let axis: Int
+    let axis: Int?
     ///  Constructor for a softMax operation across a specified axis of a tensor
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axis: (Optional) The axis of the tensor to perform a softMax operation on.  If nil, the tensor is assumed to be 1 dimensional and that dimension is used
+    ///   - axis: (Optional) The axis of the tensor to perform a softMax operation on.  If nil, the tensor is assumed to be 1 dimensional and that dimension is used.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, axis: Int = -1, name: String? = nil) {
         self.axis = axis
@@ -28,8 +28,16 @@ public class SoftMax : UnaryNode {
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
+        //  Get the batch adjusted axis
+        var adjustedAxis = 0
+        if let axis = axis {
+            adjustedAxis = axis
+        }
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+        if (adjust) {adjustedAxis += 1}
+
         //  Add to the graph itself
-        let softMaxResult = graph.mpsgraph.softMax(with: inputTensor, axis: axis, name: graph.getFullName(name))
+        let softMaxResult = graph.mpsgraph.softMax(with: inputTensor, axis: adjustedAxis, name: graph.getFullName(name))
         
         //  Remember the output tensor and shape for later
         return [softMaxResult]
@@ -38,7 +46,7 @@ public class SoftMax : UnaryNode {
 
 ///   Node to perform a softmax cross-entropy operation with a labels tensor
 public class SoftMaxCrossEntropy : BinaryNode {
-    let axis: Int
+    let axis: Int?
     let reductionType: MPSGraphLossReductionType
     
     var suffixes: [String] = []
@@ -61,6 +69,14 @@ public class SoftMaxCrossEntropy : BinaryNode {
     override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
         //  Get the input tensors
         let inputTensors = try graph.getBinaryTensors(firstInputName, secondInputName)
+        
+        //  Get the batch adjusted axis
+        var adjustedAxis = 0
+        if let axis = axis {
+            adjustedAxis = axis
+        }
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+        if (adjust) {adjustedAxis += 1}
 
         //  Add to the graph itself
         var crossEntropyName = graph.getFullName(name)
@@ -73,7 +89,7 @@ public class SoftMaxCrossEntropy : BinaryNode {
         else {
             suffixes = [""]
         }
-        let softMaxCrossEntropyResult = graph.mpsgraph.softMaxCrossEntropy(inputTensors.firstInputTensor, labels: inputTensors.secondInputTensor, axis: axis, reuctionType: reductionType, name: crossEntropyName)
+        let softMaxCrossEntropyResult = graph.mpsgraph.softMaxCrossEntropy(inputTensors.firstInputTensor, labels: inputTensors.secondInputTensor, axis: adjustedAxis, reuctionType: reductionType, name: crossEntropyName)
         
         //  If a batch graph, divide the result by the batch size to get an actual loss mean
         if (graph.batchGraph) {

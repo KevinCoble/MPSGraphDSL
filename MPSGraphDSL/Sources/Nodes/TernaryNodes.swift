@@ -99,9 +99,7 @@ public class Select : TernaryNode {
     override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
         //  Get the input tensors
         let inputTensors = try graph.getTernaryTensors(firstInputName, secondInputName, thirdInputName)
-
-        //  Make sure all the tensors have the same shape
-        try checkEqualInputShapes(inputs: inputTensors)
+        //  Select supports broadcasting, so no size checks done
         
         //  Add to the graph itself
         let selectResult = graph.mpsgraph.select(predicate: inputTensors.firstInputTensor, trueTensor: inputTensors.secondInputTensor, falseTensor: inputTensors.thirdInputTensor, name: graph.getFullName(name))

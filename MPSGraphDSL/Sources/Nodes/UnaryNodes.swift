@@ -649,7 +649,7 @@ public class Mean : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axes: an array of indices for the axes that the operation should be carried out for
+    ///   - axes: an array of indices for the axes that the operation should be carried out for.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, axes: [Int], name: String? = nil) {
         self.axes = axes
@@ -660,8 +660,12 @@ public class Mean : UnaryNode {
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
+        //  Get the batch adjusted axes
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+        let adjustedAxes = axes.map { adjust ? $0+1 : $0 }
+
         //  Add to the graph itself
-        let result = graph.mpsgraph.mean(of: inputTensor, axes: axes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
+        let result = graph.mpsgraph.mean(of: inputTensor, axes: adjustedAxes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
         
         //  Remember the output tensor and shape for later
         return [result]
@@ -678,7 +682,7 @@ public class Variance : UnaryNode {
     ///
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
-    ///   - axes: an array of indices for the axes that the operation should be carried out for
+    ///   - axes: an array of indices for the axes that the operation should be carried out for.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, axes: [Int], name: String? = nil) {
         self.axes = axes
@@ -692,7 +696,7 @@ public class Variance : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - meanTensor: (Optional) the name of the node that calculated the mean.  If nil the previous node's output will be used
-    ///   - axes: an array of indices for the axes that the operation should be carried out for
+    ///   - axes: an array of indices for the axes that the operation should be carried out for.  Adjusted for batch if adjustAxesForBatch is true
     ///   - name: (Optional) The name for this node and its associated tensor
     public init(input: String? = nil, meanTensor: String? = nil, axes: [Int], name: String? = nil) {
         self.axes = axes
@@ -705,18 +709,22 @@ public class Variance : UnaryNode {
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
+        //  Get the batch adjusted axes
+        let adjust = (graph.adjustAxesForBatch && graph.batchGraph)
+        let adjustedAxes = axes.map { adjust ? $0+1 : $0 }
+
         //  Add to the graph itself
         if haveMean {
             let meanMPSTensor = try graph.getOptionalTensor(meanTensor)
 
-            let result = graph.mpsgraph.variance(of: inputTensor, mean: meanMPSTensor, axes: axes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
+            let result = graph.mpsgraph.variance(of: inputTensor, mean: meanMPSTensor, axes: adjustedAxes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
 
             //  Remember the output tensor and shape for later
             return [result]
         }
         
         else {
-            let result = graph.mpsgraph.variance(of: inputTensor, axes: axes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
+            let result = graph.mpsgraph.variance(of: inputTensor, axes: adjustedAxes.map { NSNumber(value: $0)}, name: graph.getFullName(name))
             
             //  Remember the output tensor and shape for later
             return [result]

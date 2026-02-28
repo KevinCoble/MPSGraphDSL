@@ -210,7 +210,18 @@ struct MPSGraphDSLTests {
         let outputNDArray = result?.mpsndarray()
         var outputValues: [Float32] = Array.init(repeating: Float32(0), count: 125)
         outputNDArray?.readBytes(&outputValues, strideBytes: nil)
-        print(outputValues)
+        
+        #expect(outputValues.count == 125)
+        #expect(outputValues[0] == 4.0)
+        #expect(outputValues[1] == 6.0)
+        #expect(outputValues[2] == 8.0)
+        #expect(outputValues[3] == 10.0)
+        #expect(outputValues[4] == 12.0)
+        #expect(outputValues[5] == 4.0)
+        #expect(outputValues[6] == 6.0)
+        #expect(outputValues[7] == 8.0)
+        #expect(outputValues[8] == 10.0)
+        #expect(outputValues[9] == 12.0)
 
     }
 }

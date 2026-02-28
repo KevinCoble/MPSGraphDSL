@@ -107,6 +107,7 @@ public class Graph {
     ///  Flag for if the graph is built to accomodate batch processing
     public private(set) var batchGraph = false
     public private(set) var batchSize = 1
+    internal var adjustAxesForBatch: Bool = true
 
     //  Learning values
     internal var learningNodeName: String = "*UnnamedLearningNode*"
@@ -127,9 +128,14 @@ public class Graph {
 
     //  Node for determining if in training or testing pass.  Needed for BatchNormalization
     internal var trainingModeTensor: MPSGraphTensor? = nil
+    
+    //  Nodes for zero and one tensors for broadcasting operations
+    internal var zeroTensor: [DataType : MPSGraphTensor] = [:]
+    internal var oneTensor: [DataType : MPSGraphTensor] = [:]
 
-    internal init(batchSize: Int, buildOptions: BuildOptions, nodes: [Node]) {
+    internal init(batchSize: Int, adjustAxesForBatch: Bool, buildOptions: BuildOptions, nodes: [Node]) {
         self.batchSize = batchSize
+        self.adjustAxesForBatch = adjustAxesForBatch
         if (batchSize > 1) { batchGraph = true }
         self.buildOptions = buildOptions
         self.nodes = nodes
@@ -435,6 +441,21 @@ public class Graph {
                         }
                     }
                 }
+                
+                //  Add any listed sub-tensors
+                if (!node.targetSubTensors.isEmpty) {
+                    let suffixes = node.getNodeSuffixes()
+                    for subTensor in node.targetSubTensors {
+                        for i in 0..<addedTensors.count {
+                            if subTensor == suffixes[i] {
+                                if let added = addedTensors[i] {
+                                    targetTensors.append((modes: node.targetModes, tensor: added))
+                                }
+                                break
+                            }
+                        }
+                    }
+                }
             }
         }
         currentBlock = previousBlock
@@ -554,7 +575,31 @@ public class Graph {
         
         return trainingModeTensor!
     }
-    
+
+    //  Get the zero tensor.  Create if needed
+    internal func getZeroTensor(type: DataType) -> MPSGraphTensor {
+        let zero = zeroTensor[type]
+        if (zero == nil) {
+            let newZero = mpsgraph.constant(0.0, dataType: type.getMPSDataType())
+            zeroTensor[type] = newZero
+            return newZero
+        }
+        
+        return zero!
+    }
+
+    //  Get the one tensor.  Create if needed
+    internal func getOneTensor(type: DataType) -> MPSGraphTensor {
+        let one = oneTensor[type]
+        if (one == nil) {
+            let newOne = mpsgraph.constant(1.0, dataType: type.getMPSDataType())
+            oneTensor[type] = newOne
+            return newOne
+        }
+        
+        return one!
+    }
+
     //  Validate and get the return tensor list
     internal func getReturnTensors() throws -> [MPSGraphTensor] {
         //  If no return modified nodes found, return the last one

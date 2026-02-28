@@ -191,8 +191,8 @@ let testDataSet = splitSets.set2
 //  Time to create our Graph.  This will be a 2 layer fully-connected Neural Network with 10 nodes in the first layer and 3 nodes in the output layer (to match the classification output size)
 let graph = Graph(buildOptions: [.addLoadAssigns, .addResetAssigns]) {
     //:  Placeholders are refernces the graph uses for an input.  When running data through the graph you pass a dictionary of Tensors with the PlaceHolder name as the keys
-    PlaceHolder(shape: [4], name: "inputs")     //  This is placeholder for the inputs to the graph
-    PlaceHolder(shape: [3], modes: ["learn"], name: "expectedValue")  //  This is a placeholder for the expected results - used when training the graph so only needed in mode "learn"
+    PlaceHolder(shape: [4], type: .float32, name: "inputs")     //  This is placeholder for the inputs to the graph
+    PlaceHolder(shape: [3], type: .float32, modes: ["learn"], name: "expectedValue")  //  This is a placeholder for the expected results - used when training the graph so only needed in mode "learn"
     FullyConnectedLayer(input: "inputs", outputShape: TensorShape([10]), activationFunction: .sigmoid, name: "hidden")  //  This is a fully connected NN layer with 10 nodes, using a sigmoid activation function.  It gets its data from the node 'inputs' - the placeholder above
         .learnWithRespectTo("loss")     //  This modifies the FullyConnectedLayer to update the weights and bias terms based on the loss function labeled 'loss' -  which is a calcution node near the end of the graph
     FullyConnectedLayer(input: "hidden", outputShape: TensorShape([3]), activationFunction: .sigmoid, name: "result")   //  Another fully connected NN layer, with 3 nodes this time

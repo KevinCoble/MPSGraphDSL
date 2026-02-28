@@ -66,6 +66,13 @@ public struct TensorShape : Equatable, Sendable
         }
     }
     
+    ///  Return if the shape is variable (has a -1 dimension
+    public var isVariable : Bool {
+        get {
+            return dimensions.contains(-1)
+        }
+    }
+
     /// Determine if the shape starts with the passed in batch size
     /// - Parameter batchSize: The batch size to check the shape agains
     /// - Returns: true if the shape starts with the specified size, else false

@@ -276,6 +276,7 @@ To try to make this process easy, Graphs can be built in 'batch' mode.  When a b
 graph = Graph(batchSize: 16) {
     PlaceHolder(shape: [28, 28], type: .float32, name: "input")
     .
+    Concatenate(["input", "another_tensor"], dimension: 0, name: "concatenate")
     .
     .
     SoftMax(name: "result")
@@ -283,7 +284,9 @@ graph = Graph(batchSize: 16) {
 }
 ```
 
-The PlaceHolder takes an 28x28 Float32 input image.  When the Graph is used a 16x28x28 Tensor will be passed to the Graph, with 16 samples (of shape \[28, 28\]) concatenated together to make the batch.  Any result Tensors may have a batch dimension as well, so check rather than assume.  Testing and Training functions on the Graph will automatically take care of the batch dimension.
+The PlaceHolder node takes an 28⨉28 Float32 input image.  When the Graph is used a 16⨉28⨉28 Tensor will be passed to the Graph, with 16 samples (of shape \[28, 28\]) concatenated together to make the batch.  Any result Tensors may have a batch dimension as well, so check rather than assume.  Testing and Training functions on the Graph will automatically take care of the batch dimension.
+
+The Concatenate node is configured to concatenate the passed in tensors along the '0' dimension - the first 28 in the placeholder.  However, when the batch dimension is added the input will be 16⨉28⨉28, so the concatenation now needs to happen on the '1' dimension.  If the Graph is built with the 'adjustAxesForBatch' flag true (the default, so it will be for this Graph), then it will automatically adjust the dimension up one when a batch dimension is added.
 
 Many neural network nodes like FullyConnectedLayer, ConvolutionLayer, etc. deal with batch dimension tensors by running each batch sample through the operations with weight/bias variables that are not expanded for the batch size.  This means you can create a Graph to train/test with the speed inprovement of batch processing, but put the same weights and biases into a future Graph (with the same structure of nodes) that does not require batch inputs for user inference runs.
 

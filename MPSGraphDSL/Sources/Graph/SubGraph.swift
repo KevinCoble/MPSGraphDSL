@@ -40,7 +40,7 @@ public class SubGraph : Node {
     /// Modifier for a Node to indicate it is a target for the specified modes.  For a subgraph this results in an error
     /// - Parameter modes: The modes that this node is a target for
     /// - Returns: The modified Node
-    override public func targetForModes(_ modes: [String]) -> Node {
+    override public func targetForModes(_ modes: [String], subTensors: [String] = []) -> Node {
         buildError = MPSGraphDSLErrors.NodeCannotBeTarget
         return self
     }

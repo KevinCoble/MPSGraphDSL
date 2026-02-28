@@ -13,6 +13,7 @@ import MetalPerformanceShadersGraph
 public class Node {
     let name: String?
     var targetModes : [String] = []
+    var targetSubTensors: [String] = []
     var returnIndex : Int?          //  If not nil, return from control block index
     var buildError : Error? = nil
     var referencedByAnotherNode: Bool = false
@@ -22,13 +23,16 @@ public class Node {
     }
     
     /// Modifier for a Node to indicate it is a target for the specified modes
-    /// - Parameter modes: The modes that this node is a target for
+    /// - Parameters:
+    ///   - modes: The modes that this node is a target for
+    ///   - subTensors: (Optional)  The suffixes for node sub-tensors that are not automatically added to the target list, but you want targetted anyway
     /// - Returns: The modified Node
-    public func targetForModes(_ modes: [String]) -> Node {
+    public func targetForModes(_ modes: [String], subTensors: [String] = []) -> Node {
         if (name == nil) {
             buildError = MPSGraphDSLErrors.TargetNodesMustBeNamed
         }
         targetModes = modes
+        targetSubTensors = subTensors
         return self
     }
     
