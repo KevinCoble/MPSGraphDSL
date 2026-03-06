@@ -32,6 +32,8 @@ At least one node in a Graph must be designated as a target, although many can b
 
 Any node can be designated as a target.  To do so use a 'targetForModes' modifier on the node to specify which modes the node should be a target for.  Nodes designated as targets must be named (often a name is optional), as the output data Tensors will be returned in a dictionary keyed by the name of the target node.  The 'targetForModes' modifier should be last of all modifiers for a node, as it is generic to all nodes and can stop any other modifiers that come after it from being recognized as valid for the node.
 
+Complex nodes often add multiple tensors to the graph.  Usually only the last tensor, or in rare cases a few tensors, are used by downstream nodes.  Therefore only those commonly used tensors are targetted when the node is specified to be a target.  See documentation of these nodes (generally the neural network nodes) to see what tensors are targetted.  It is possible to add any of the other tensors to the target list with the optional 'subTensors' parameter of the 'targetForModes' modifier.
+
 #### PlaceHolders
 
 A ``PlaceHolder`` is a 'leaf' node, a node with no inputs from other nodes in the Graph so data only flows out of it.  A PlaceHolder, as the name implies, holds the place in the Graph where external inputs will be present when the Graph is performing calculations.  PlaceHolders also are required to be named.  When you 'run' the Graph you provide a dictionary of Tensors keyed by the PlaceHolder names for the inputs needed.

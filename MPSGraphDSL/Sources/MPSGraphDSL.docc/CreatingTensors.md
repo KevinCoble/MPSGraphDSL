@@ -14,6 +14,7 @@ If at coding time you know what data type is needed, it is usually best to just 
 * ``TensorInt32``
 * ``TensorUInt8``
 * ``TensorDouble``
+* ``TensorBool``
 
 Note: Double tensors are not usable by the MPSGraph system, but the data parsers will create them if you want.
 
@@ -51,6 +52,8 @@ Once you have a data type and a shape, the only other thing you need to create a
 | Random Uniform       | Each element is assigned a uniform random value from a range that is passed to the initializer         |
 | Random Normal        | Each element is assigned a normal distribution random value from a mean and standard deviation that is passed to the initializer |
 | MPSGraphTensorData   | The elements are transfered from an MPSGraph result (usually done internally)                          |
+
+Note that boolean tensors just take the value and compare it with zero for the true/false indication (false is zero, true is nonzero)
 
 ## Creation Examples
 

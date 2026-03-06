@@ -160,6 +160,10 @@ public enum MPSGraphNeuralNetErrors : Error {
     case InputTensorNotSquare2D
     ///  Recurrent weights that are configured for orthogonal initialization must be for floating types - check input type to the layer
     case OrthogonalizationOnNonFloatingTensor
+    ///  Unable to get token block size
+    case UnableToGetTokenBlockSize
+    ///  Cross-Attention input shapes must match
+    case CrossAttentionInputShapesMismatch
 }
 
 ///  Errors that can be thrown by the MPSGraph building system when dealing with control nodes (If, For, While)

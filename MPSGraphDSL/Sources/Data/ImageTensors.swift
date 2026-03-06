@@ -67,6 +67,10 @@ public class ImageToTensor {
             let elements = result.pixelValues.map{Double($0) * scale + min}
             let tensor = try TensorDouble(shape: shape, initialValues: elements)
             return tensor
+        case .bool:
+            let elements = result.pixelValues.map{ $0 == 0 ? false : true}
+            let tensor = try TensorBool(shape: shape, initialValues: elements)
+            return tensor
         }
     }
     
@@ -127,6 +131,10 @@ public class ImageToTensor {
             let scale: Double = 1.0 / (Double(UInt8.max) * (max - min))
             let elements = result.pixelValues.map{Double($0) * scale + min}
             let tensor = try TensorDouble(shape: shape, initialValues: elements)
+            return tensor
+        case .bool:
+            let elements = result.pixelValues.map{$0 == 0 ? false : true}
+            let tensor = try TensorBool(shape: shape, initialValues: elements)
             return tensor
         }
     }
@@ -310,6 +318,16 @@ public class TensorToImage {
                 if (value < 0) { elements.append(0) }
                 else if (value > 255)  { elements.append(255) }
                 else { elements.append(UInt8(value + 0.5)) }
+            }
+        case .bool:
+            let castTensor = tensor as! TensorBool
+            let tensorElements = castTensor.elements
+            let min = UInt8(range.min.asInteger)
+            let max = UInt8(range.max.asInteger)
+            elements = []
+            for element in tensorElements {
+                let value = element ? max : min
+                elements.append(value)
             }
         }
         

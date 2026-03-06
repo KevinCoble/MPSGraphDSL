@@ -16,6 +16,8 @@ The following composite nodes are available:
 | ``PoolingLayer``         | A pooling layer, with three possible pooling functions.  Tensor ranks are managed (MPSGraph requires 4D inputs)|
 | ``ConvolutionLayer``     | A convolution layer, with two-dimensional or three-dimensional kernels.  Tensor ranks are managed (MPSGraph requires 4D or 5D inputs)|
 | ``BatchNormalization``   | A node to batch normalize the outputs of a previous layer.  Weights, biases, mean, and variance tensors are managed|
+| ``SelfAttention``        | A node to create a (possibly multi-headed) self-attention layer                                               |
+| ``CrossAttention``       | A node to create a (possibly multi-headed) cross-attention layer                                              |
 
 In addition, topics in this article discuss how to use the Graph functions to test and train both classification and regression networks.
 
@@ -527,7 +529,7 @@ The following modifier is available for the BatchNormalization node:
 | ----------------------------------| ----------- |
 |  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
 
-As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the FullyConnectedLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
+As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the BatchNormalization node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
 ####  Tensors Added by a BatchNormalization Layer
 
@@ -571,3 +573,84 @@ These tensors can be referenced using the name of the node with the suffix added
 ####  Additional Data in the BatchNormalization Layer
 
 The batch normalization process uses a calculated mean and variance of the batch of input data to normalize those values.  The running average of those two calculations are determined during training, and those averages are used in non-learning (inference) modes.  The running mean and variance variables, while not specifically 'learned', should be saved after training along with any other learned weights (such as the beta and gamma tensors of the batch normalization layer) and placed back into the variables for inference - if the graph is reloaded after training.  The running mean and variance tensors are added to the load-reset variable list automatically by the node.
+
+### SelfAttention
+
+A self-attention layer is a layer that has three projection networks (fully connected layers with optional bias) that create a Query, Key, and Value matrix from an input set of token embeddings (often created with the ``TokenEmbedding`` node).  The Query projection matrix is multiplied by the transpose of the Key projection matrix.  An optional mask can then be applied to remove the upper-right triangle of the matrix - removing interaction from future tokens with previous ones.  The result is then scaled and ran through a SoftMax operation.  Then the result of the SoftMax is multiplied by the Value projection to create the output of the attention layer.
+
+This processing allows the individual tokens to 'interact' with each other, and is the basis for transformer networks.
+
+####  Creating a SelfAttention Layer
+
+The following initializer is used in a Graph (or SubGraph) definition to add a SelfAttention layer:
+
+```swift
+SelfAttention(input: String? = nil, headSize: Int, numHeads: Int = 1, masked: Bool = false, name: String)
+```
+
+The input tensor and node name are standard parameters.  See the article on Creating Graphs for more information.
+
+The headSize parameter sets the size of the three projection matrices.  A (non-batched) input of \[numTokens, embeddingSize\] will create a projection of \[numTokens, headSize\], which will be the output shape as well, if there is only one head in the layer.
+
+The numHeads parameter sets the number of independent attention heads in the layer.  The output of the layer will be \[numHeads, numTokens, headSize\].  Other libraries concatenate the head outputs together.  MPSGraphDSL does not do this, but it is a simple operation to do so if that is desired.
+
+The masked parameter is a boolean that determines if a matrix of negative infinity values in the upper-right triangle is added to the multiplied Query and Key projections.  Doing so will remove (set to 0) the values when they are passed through the SoftMax operation.  This is often done to keep tokens from interacting with later (future) tokens in the token sequence list.
+
+The input tensor must be a floating type (Float32 or Float16).  The output of the layer will be of the same data type.
+
+####  Modifiers for a SelfAttention Layer
+
+The following modifier is available for the SelfAttention node:
+
+| Modifier            | Description |
+| ----------------------------------| ----------- |
+|  setQueryWeightInitializer(_ initializer:)   |  Sets the initializer method and values for the Query projection generator.  Default is .XavierGlorotNormal       |
+|  setKeyWeightInitializer(_ initializer:)   |  Sets the initializer method and values for the Key projection generator.  Default is .XavierGlorotNormal       |
+|  setValueWeightInitializer(_ initializer:)   |  Sets the initializer method and values for the Value projection generator.  Default is .XavierGlorotNormal       |
+|  addQueryBias()                      |  Adds a bias term to the Query projection generator.  By default no bias term is used       |
+|  addKeyBias()                      |  Adds a bias term to the Key projection generator.  By default no bias term is used       |
+|  addValueBias()                      |  Adds a bias term to the Value projection generator.  By default no bias term is used       |
+|  setBiasUse(query: , key: , value: )          |  Sets the bias term addition flags for all three of the  projection generators.  By default no bias term is used       |
+|  queryBiasInitialValue(initialValue: )      |  Sets the initial value for the bias term in the Query projection generator.  The default value is 0       |
+|  keyBiasInitialValue(initialValue: )      |  Sets the initial value for the bias term in the Key projection generator.  The default value is 0       |
+|  valueBiasInitialValue(initialValue: )      |  Sets the initial value for the bias term in the Value projection generator.  The default value is 0       |
+|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+
+As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the SelfAttention node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
+
+####  Tensors Added by a BatchNormalization Layer
+
+The following tensors are added to the Graph by the node:
+
+| Suffix                | Targetted | Description |
+| --------------------- | --------- | ---------------------- |
+| "_input_reshape"      |     No     | If a batch graph.  Add a 'head' dimension to the input for broadcast purposes        |
+| "_key_weights"        |     No     | The weight matrix for the key projection generator        |
+| "_key_matrixMult"     |     No     | The matrix multiplication of the input by the weight matrix        |
+| "_key_biases""       |     No      | If bias term being used for keys.  The bias matrix for the key projection genererator        |
+| "_key"                |     No     | If bias term being used for keys.  The addition of the bias to the matrix multiplication     |
+| "_query_weights"        |     No     | The weight matrix for the query projection generator        |
+| "_query_matrixMult"     |     No     | The matrix multiplication of the input by the weight matrix        |
+| "_query_biases""       |     No      | If bias term being used for querys.  The bias matrix for the query projection genererator        |
+| "_query"                |     No     | If bias term being used for querys.  The addition of the bias to the matrix multiplication     |
+| "_mask"                |     No     | If mask being used.  The mask to remove future token interaction
+| "_value_weights"        |     No     | The weight matrix for the value projection generator        |
+| "_value_matrixMult"     |     No     | The matrix multiplication of the input by the weight matrix        |
+| "_value_biases""       |     No      | If bias term being used for values.  The bias matrix for the value projection genererator        |
+| "_value"                |     No     | If bias term being used for values.  The addition of the bias to the matrix multiplication     |
+| "_transposedKey"        |     No     | The transpose of the key projection     |
+| "_QxKT"                |     No      | The multiplication of the Query projection by the transposed Key projection     |
+| "_scalingConstant"      |     No     | The constant 1/sqrt(head size)    |
+| "_scaledQxKT"           |     No     | The QxKT tensor scaled by 1/sqrt(head size)    |
+| "_maskedScaledQxKT"     |     No     | If a mask is specified. The scaled QxKT tensor with the added mask    |
+| "_softmax"              |     No     | The SoftMax operation applied to the scaled (and possibly masked) QxKT tensor     |
+| "_scaledAttention" or "" | If numHeads > 1 | The result of the SoftMax operation mulitiplied by the Value projection matrix     |
+| ""                     |     Yes    | If numHeads == 1.  The output reshaped to remove the 'head' dimension added at the beginning    |
+
+These tensors can be referenced using the name of the node with the suffix added.
+
+### CrossAttention
+
+A cross-attention layer is a layer that has three projection networks (fully connected layers with optional bias) that create a Query, Key, and Value matrix from two sets of inputs.  The cross-attention   layer uses the first input in the Query projections, but the second input in the Key and Value projections.  This allows the first input to 'pay attention' to the second input. The Query projection matrix is multiplied by the transpose of the Key projection matrix.  An optional mask can then be applied to remove the upper-right triangle of the matrix - removing interaction from future tokens with previous ones.  The result is then scaled and ran through a SoftMax operation.  Then the result of the SoftMax is multiplied by the Value projection to create the output of the attention layer.
+
+There is no other difference other than the inputs used in the projections, so the documentation for the SelfAttention layer applies.

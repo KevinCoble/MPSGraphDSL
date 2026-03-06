@@ -28,6 +28,8 @@ public enum DataType: Sendable {
     case float32
     ///  Double
     case double
+    ///  Bool
+    case bool
     
     /// Initialize a data type from an MPSDataType enumeration
     /// - Parameter mpsDataType: the MPSDataType enumeration to be converted
@@ -41,6 +43,8 @@ public enum DataType: Sendable {
             self = .float16
         case .float32:
             self = .float32
+        case .bool:
+            self = .bool
         default:
             self = .float32
         }
@@ -70,6 +74,8 @@ public enum DataType: Sendable {
             return (element is Float32)
         case .double:
             return (element is Double)
+        case .bool:
+            return (element is Bool)
         }
     }
     
@@ -86,6 +92,8 @@ public enum DataType: Sendable {
             return Float32(0)
         case .double:
             return Double(0.0)
+        case .bool:
+            return false
         }
     }
 
@@ -106,6 +114,8 @@ public enum DataType: Sendable {
             return Float(value)
         case .double:
             return Double(value)
+        case .bool:
+            return (value != 0)
         }
     }
 
@@ -126,6 +136,8 @@ public enum DataType: Sendable {
             return Float(value)
         case .double:
             return value
+        case .bool:
+            return (value != 0.0)
         }
     }
 
@@ -142,6 +154,8 @@ public enum DataType: Sendable {
             return Float.defaultRange
         case .double:
             return Double.defaultRange
+        case .bool:
+            return Bool.defaultRange
         }
     }
 
@@ -156,6 +170,8 @@ public enum DataType: Sendable {
             return .float16
         case .float32:
             return .float32
+        case .bool:
+            return .bool
         default:
             return .invalid
         }
@@ -588,5 +604,68 @@ extension Double : DataElement {
     public static func getRandomNumberInRange(range: ParameterRange) -> DataElement {
         let doubleRange = range.min.asDouble...range.max.asDouble
         return Double.random(in: doubleRange)
+    }
+}
+
+
+extension Bool : DataElement {
+    public static var dataType : DataType { get { return .bool }}
+    public var dataType : DataType { get { return .bool }}
+
+    /// Get the default range of the data type
+    public static var defaultRange : ParameterRange {
+        get {
+            do {
+                return try ParameterRange(minimum: false, maximum: true)
+            }
+            catch { fatalError() } //  Should never be reached}
+        }
+    }
+    
+    ///  Get the data type as an integer
+    public var asInteger : Int {
+        get {
+            return self ? 1 : 0
+        }
+        set(newValue) {
+            self = (newValue != 0)
+        }
+    }
+
+    //  Get the data type as a Double floating point value
+    public var asDouble : Double {
+        get { return self ? 1.0 : 0.0 }
+        set(newValue) {
+            self = (newValue != 0.0)
+        }
+    }
+    ///  Return the value of a Double as the type of this DataElement
+    public static func fromDouble(_ value: Double) -> DataElement {
+        return (value != 0.0)
+    }
+
+    ///  Gets or sets the value as a Float32
+    public var asFloat32 : Float32 {
+        get { return self ? 1.0 : 0.0 }
+        set(newValue) {
+            self = (newValue != 0.0)
+        }
+    }
+
+    /// Convert the DataElement value to an unsigned byte.  If a range is passed in, that range is used to scale the value into the 0-255 value.  Otherwise the default positive scale of the DataElement type is used
+    /// - Parameter range: The range of the DataElement to scale to teh UInt8 range
+    /// - Returns: The DataElement value converted to a UInt8 value
+    public func asUnsignedByte(range: ParameterRange?) -> UInt8 {
+        //  Ignore the range for bools
+        return UInt8(self ? 1 : 0)
+    }
+
+    /// Get a random number of the DataElement type within a passed-in range
+    /// - Parameter range: the range for the random value
+    /// - Returns: a random value in the specified range
+    public static func getRandomNumberInRange(range: ParameterRange) -> DataElement {
+        //  Just return a random bool
+        let randomInt = Int.random(in: 0..<2)
+        return (randomInt == 0)
     }
 }

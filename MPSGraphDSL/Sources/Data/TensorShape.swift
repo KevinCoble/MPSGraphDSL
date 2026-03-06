@@ -81,6 +81,8 @@ public struct TensorShape : Equatable, Sendable
             return false
     }
     
+    /// Get the shape with the first (batch) dimension removed (if there is one)
+    /// - Returns: the shape without the batch dimension
     public func shapeWithRemovedBatchDimension() -> TensorShape {
         if (dimensions.count <= 1) { return self }
         var newDimensions = dimensions
@@ -88,6 +90,9 @@ public struct TensorShape : Equatable, Sendable
         return TensorShape(newDimensions)
     }
     
+    /// Create a shape by adding a specified size batch dimension to this shape
+    /// - Parameter batchSize: the size of the batch dimension
+    /// - Returns: the shape with the added batch dimension
     public func shapeWithAddedBatchDimension(_ batchSize: Int) -> TensorShape {
         var newDimensions = dimensions
         newDimensions.insert(batchSize, at: 0)
@@ -99,6 +104,24 @@ public struct TensorShape : Equatable, Sendable
         get {
             return dimensions.reduce(1, *)
         }
+    }
+    
+    /// Get the number of left-side dimensions that match
+    /// - Parameter withShape: the shape to compare with
+    /// - Returns: the number of consecutive dimensions, starting at the left, that are of the same size
+    public func numMatchingDimensions(_ withShape: TensorShape) -> Int {
+        var numBroadcastDimensions = 0
+        let maxDimensions = min(numDimensions, withShape.numDimensions)
+        for dim in 0..<maxDimensions {
+            if (dimensions[dim] == withShape.dimensions[dim]) {
+                numBroadcastDimensions += 1
+            }
+            else {
+                break
+            }
+        }
+        
+        return numBroadcastDimensions
     }
     
     ///  Get the storage location given a location within the dimension space

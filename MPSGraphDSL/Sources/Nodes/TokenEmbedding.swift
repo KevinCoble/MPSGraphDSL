@@ -17,7 +17,7 @@ public class TokenEmbedding : UnaryNode {
     let embeddingType: DataType
     let table: Tensor?      //  If not nil, set translation table to constant values from this tensor
     
-    var tableInitialization: WeightInitialization = .uniform(min: -1.0, max: 1.0)
+    var tableInitialization: WeightInitialization = .normal(mean: 0.0, standardDeviation: 1.0)
     var lossNode: String? = nil
     var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
     var gradientClipping: (min: Double, max: Double)? = nil

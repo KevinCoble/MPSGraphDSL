@@ -93,7 +93,7 @@ public class ImageChunk {
             switch (into.inputType) {
             case .uInt8, .int32:
                 inputRange = try ParameterRange(minimum: 0.0, maximum: 255.0)
-            case .float16, .float32, .double:
+            case .float16, .float32, .double, .bool:
                 inputRange = try ParameterRange(minimum: 0.0, maximum: 1.0)
             }
         }

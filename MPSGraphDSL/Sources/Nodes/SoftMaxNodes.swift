@@ -161,7 +161,7 @@ public class ClassificationCrossEntropy : BinaryNode {
             throw MPSGraphDSLErrors.InputShapeError("Logits must be one dimension larger than classification indices")
         }
         for i in 0..<classIndicesShape.dimensions.count {
-            if (logitsShape.dimensions[i] != classIndicesShape.dimensions[i]) {
+            if (logitsShape.dimensions[i] != classIndicesShape.dimensions[i] && logitsShape.dimensions[i] > 0) {
                 throw MPSGraphDSLErrors.InputShapeError("Logits and classification indices must have the same shape in all dimensions except the classification indices dimension")
             }
         }

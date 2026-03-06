@@ -57,6 +57,20 @@ extension String: DataConvertible {
     }
 }
 
+extension Bool: DataConvertible {
+    /// Initialize a bool from a byte in a Data object
+    /// - Parameter data: The data object with the Bool byte
+    public init?(data: Data) {
+        let byte = Int8(data: data)
+        self = (byte != 0)
+    }
+    /// Computed parameter that returns a Data object with the byte from the Bool
+    public var data: Data {
+        let byte = self ? Int8(1) : Int8(0)
+        return byte.data
+    }
+}
+
 extension Data {
     /// Append the byte representation of a value to the bytes in the Data object
     /// - Parameter value: The value to be converted to bytes and added
