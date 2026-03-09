@@ -224,5 +224,48 @@ struct MPSGraphDSLTests {
         #expect(outputValues[9] == 12.0)
 
     }
+    
+    @Test func repeatBlockTest() async throws {
+        
+        //  Case where unnamed previous reference is used
+        let graph = Graph {
+            Constant(shape: [1], value: Float32(2), name: "two")
+            Constant(shape: [1], value: Float32(3), name: "three")
+            Repeat(3) {
+                Addition(secondInput: "two", name: "addition")
+            }
+            Identity(name: "result")        //  Get the last repeat node and make it a target
+                .targetForModes(["repeatTest"])
+        }
+        
+        // Execute the graph.
+        let results = try graph.runOne(mode: "repeatTest", inputTensors: [:])
+        let result = results["result"]!
+        
+        //  Three + (2 + 2 + 2) - from repeat block, is 9
+        let value = try result.getElement(index: 0)
+        #expect(value == 9.0)
+        
+        //  Case where named circular reference is used
+        let graph2 = Graph {
+            Constant(shape: [1], value: Float32(2), name: "two")
+            Constant(shape: [1], value: Float32(3), name: "three")
+            Repeat(3) {
+                RepeatTensorName(initialName: "two", repeatName: "addition", referenceName: "blockInput")
+                Addition(firstInput: "blockInput", secondInput: "three", name: "addition")
+            }
+            Identity(name: "result")        //  Get the last repeat node and make it a target
+                .targetForModes(["repeatTest"])
+        }
+        
+        // Execute the graph.
+        let results2 = try graph2.runOne(mode: "repeatTest", inputTensors: [:])
+        let result2 = results2["result"]!
+        
+        //  two + (3 + 3 + 3) - from repeat block, is 11
+        let value2 = try result2.getElement(index: 0)
+        #expect(value2 == 11.0)
+
+    }
 }
 

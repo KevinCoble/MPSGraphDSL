@@ -23,6 +23,8 @@ public class BatchNormalization : UnaryNode {
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
+    
+    var totalParameterCount: Int = 0
 
     ///  Constructor for a batch normalization node
     ///
@@ -52,7 +54,8 @@ public class BatchNormalization : UnaryNode {
         
         suffixes = []
         targetIndices = []
-        
+        totalParameterCount = 0
+
         //  See if we have an activation function
         let haveActivationFunction: Bool
         switch (activationFunction) {
@@ -113,6 +116,7 @@ public class BatchNormalization : UnaryNode {
         if let lossNode = lossNode {
             let learningVariable = LearningVariable(variable: node, tensor: gammaTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
             graph.learningVariables.append(learningVariable)
+            totalParameterCount += shape.totalSize
         }
         
         //  Create the beta variable, initialized to zeros
@@ -134,6 +138,7 @@ public class BatchNormalization : UnaryNode {
         if let lossNode = lossNode {
             let learningVariable = LearningVariable(variable: node, tensor: betaTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
             graph.learningVariables.append(learningVariable)
+            totalParameterCount += shape.totalSize
         }
         
         //  Create the running mean variable, initialized to zeros
@@ -286,11 +291,6 @@ public class BatchNormalization : UnaryNode {
             }
         }
         
-//        let tempResult = graph.mpsgraph.identity(with: runningVarianceTensor, name: graph.getFullName(name)!)
-//        addedTensors.append(tempResult)
-//        targetIndices.append(suffixes.count)
-//        suffixes.append("")
-
         return addedTensors
     }
     
@@ -314,5 +314,9 @@ public class BatchNormalization : UnaryNode {
         self.learningOptimizer = using
         self.gradientClipping = gradientClipping
         return self
+    }
+    
+    override func getNumberOfParameters() throws -> Int {
+        return totalParameterCount
     }
 }

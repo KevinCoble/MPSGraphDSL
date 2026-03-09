@@ -77,4 +77,6 @@ Reading the five articles referenced above will definitely get you well on your 
 - ``LSTMLayer``
 - ``ConvolutionLayer``
 - ``PoolingLayer``
+- ``SelfAttention``
+- ``LayerNormalization``
 - ``Learning``

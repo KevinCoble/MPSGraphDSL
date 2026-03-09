@@ -24,6 +24,8 @@ public class TokenEmbedding : UnaryNode {
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
+    
+    var totalParameterCount: Int = 0
 
     /// Create a learnable (translation table is an initialized variable node) token embedding node
     /// - Parameters:
@@ -59,6 +61,8 @@ public class TokenEmbedding : UnaryNode {
     }
 
     override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        totalParameterCount = 0
+        
         //  Get the input token tensor
         let tokenTensor = try graph.getUnaryTensor(name: inputName)
         
@@ -88,6 +92,7 @@ public class TokenEmbedding : UnaryNode {
             if let lossNode = lossNode {
                 let learningVariable = LearningVariable(variable: node, tensor: tableTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
                 graph.learningVariables.append(learningVariable)
+                totalParameterCount += tableShape.totalSize
             }
         }
         suffixes.append("_table")
@@ -124,5 +129,9 @@ public class TokenEmbedding : UnaryNode {
         self.learningOptimizer = using
         self.gradientClipping = gradientClipping
         return self
+    }
+    
+    override func getNumberOfParameters() throws -> Int {
+        return totalParameterCount
     }
 }

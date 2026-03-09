@@ -16,6 +16,7 @@ internal struct AddedNode {
     let mpstensor : MPSGraphTensor
     let outputShape: TensorShape
     let block: String
+    let insideControlBlock: Bool
 }
 
 internal class LoadResetAssignInfo {
@@ -102,7 +103,10 @@ public class Graph {
     internal var nodeLearningOps: [MPSGraphOperation] = []
     internal var nodeNonLearningOps: [MPSGraphOperation] = []
     internal var currentBlock: String
+    internal var insideControlBlock: Bool
     internal var returnIndices: [Int : Int]     //  return index :  addedTensor index
+    internal var firstRepeatBlock: Bool = false
+    internal var repeatReferences: [String: (String, String)] = [:]
 
     ///  Flag for if the graph is built to accomodate batch processing
     public private(set) var batchGraph = false
@@ -140,6 +144,7 @@ public class Graph {
         self.buildOptions = buildOptions
         self.nodes = nodes
         self.currentBlock = ""
+        self.insideControlBlock = false
         self.returnIndices = [:]
     }
     
@@ -378,9 +383,11 @@ public class Graph {
         }
     }
     
-    internal func processNodes(_ nodes: [Node], block: String = "") throws {
+    internal func processNodes(_ nodes: [Node], block: String = "", controlBlock: Bool = false) throws {
         let previousBlock = currentBlock
+        let previousInControlBlock = insideControlBlock
         currentBlock = block
+        if (controlBlock) { insideControlBlock = true }
         returnIndices = [:]
         for node in nodes {
             let addedTensors = try node.addToGraph(graph: self)
@@ -404,11 +411,11 @@ public class Graph {
                         if (opName.starts(with: "MPSGraphDSL.")) { opName = String(opName.trimmingPrefix("MPSGraphDSL.")) }
                         
                         //  Create the added node struct
-                        let addedNode = AddedNode(name: fullName, operation: opName, node: node, mpstensor: addedTensor, outputShape: shape, block: currentBlock)
+                        let addedNode = AddedNode(name: fullName, operation: opName, node: node, mpstensor: addedTensor, outputShape: shape, block: currentBlock, insideControlBlock: insideControlBlock)
                         
                         //  Check for block return and add the return indices as needed
                         if let returnIndex = node.returnIndex {
-                            if (currentBlock == "") { throw MPSGraphControlNodeErrors.ReturnIndicesNotValidOutsideOfBlocks }
+                            if (currentBlock == "" || !controlBlock) { throw MPSGraphControlNodeErrors.ReturnIndicesNotValidOutsideOfBlocks }
                             returnIndices[i + returnIndex] = allAddedNodes.count
                         }
                         
@@ -424,7 +431,7 @@ public class Graph {
             
             //  If a target node, add it to the list
             if !node.targetModes.isEmpty {
-                if (currentBlock != "") { throw MPSGraphControlNodeErrors.NodeInControlBlockCannotBeTarget }
+                if (controlBlock) { throw MPSGraphControlNodeErrors.NodeInControlBlockCannotBeTarget }
                 if let targetIndices = node.getTargetIndices() {
                     //  We have a list of tensors to target, add them
                     for index in targetIndices {
@@ -459,6 +466,7 @@ public class Graph {
             }
         }
         currentBlock = previousBlock
+        insideControlBlock = previousInControlBlock
     }
     
     internal func setNewCurrentPrefix(_ newPrefix : String) {
@@ -471,6 +479,11 @@ public class Graph {
         currentNamePrefix = prefixStack.last!
     }
     
+    internal func removeSecondFromLastFromPrefixStack() {
+        let secondFromLast = prefixStack.count - 2
+        prefixStack.remove(at: secondFromLast)
+    }
+
     internal func getFullName(_ name: String?) -> String? {
         if (name == nil) {return nil}
         return currentNamePrefix + name!
@@ -486,12 +499,23 @@ public class Graph {
     }
     
     internal func findNamedNode(_ name : String) throws -> AddedNode? {
+        //  If there is a repeatReferences list, use that
+        var nameToUse = name
+        if let repeatReference = repeatReferences[name] {
+            if (firstRepeatBlock) {
+                nameToUse = repeatReference.0
+            }
+            else {
+                nameToUse = repeatReference.1
+            }
+        }
+        
         //  Look for the node starting with the current prefix, then working all the way down to initial empty prefix
         for prefix in prefixStack.reversed() {
-            let fullName = prefix + name
+            let fullName = prefix + nameToUse
             let addedNode = allAddedNodes.first(where: { $0.name == fullName })
             if let addedNode = addedNode {
-                if (currentBlock != addedNode.block) { throw MPSGraphControlNodeErrors.NodeInControlBlockCannotReferenceOutsideBlock }
+                if (currentBlock != addedNode.block && addedNode.insideControlBlock) { throw MPSGraphControlNodeErrors.NodeInControlBlockCannotReferenceOutsideBlock }
                 return addedNode
             }
         }
@@ -1670,6 +1694,21 @@ public class Graph {
         
         //  Run the assignment operations
         _ = mpsgraph.run(feeds: feedDict, targetTensors: [], targetOperations: resetOps)
+    }
+    
+    /// Get the total number of parameters in the Graph.  Will build the graph if it has not already been built
+    /// - Returns: The total number of parameters created by the nodes in the Graph
+    public func getNumberOfParameters() throws -> Int {
+        //  Get the graph ready
+        if (mpsgraph == nil) { try buildGraph() }
+        
+        var total = 0
+        
+        for node in nodes {
+            total += try node.getNumberOfParameters()
+        }
+        
+        return total
     }
 }
 

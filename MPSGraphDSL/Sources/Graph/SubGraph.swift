@@ -100,4 +100,13 @@ public class SubGraph : Node {
     override internal func isReferenced() throws {
         try subGraphDef.nodesAreReferenced()
     }
+    
+    //  Get the number of parameters put in by the sub-nodes
+    override func getNumberOfParameters() throws -> Int {
+        var total: Int = 0
+        for node in subGraphDef.nodes {
+            total += try node.getNumberOfParameters()
+        }
+        return total
+    }
 }

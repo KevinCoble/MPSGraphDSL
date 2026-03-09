@@ -42,6 +42,8 @@ public class FullyConnectedLayer : UnaryNode {
     var suffixes: [String] = []
     var targetIndices: [Int] = []
     
+    var totalParameterCount: Int = 0
+
     ///  Constructor for a fully connected node
     ///
     /// - Parameters:
@@ -57,7 +59,7 @@ public class FullyConnectedLayer : UnaryNode {
         switch (activationFunction) {
             case .none, .tanh, .sigmoid:
                 weightInitialization = .XavierGlorotNormal
-            case .relu, .leakyRelu, .leakyReluFromTensor, .gelu:
+        case .relu, .leakyRelu, .leakyReluFromTensor, .gelu, .elu:
                 weightInitialization = .HeNormal
         }
         super.init(input: input, name: name)
@@ -77,7 +79,8 @@ public class FullyConnectedLayer : UnaryNode {
         
         suffixes = []
         targetIndices = []
-        
+        totalParameterCount = 0
+
         //  See if we have an activation function
         let haveActivationFunction: Bool
         switch (activationFunction) {
@@ -167,6 +170,7 @@ public class FullyConnectedLayer : UnaryNode {
         if let lossNode = lossNode {
             let learningVariable = LearningVariable(variable: node, tensor: weightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
             graph.learningVariables.append(learningVariable)
+            totalParameterCount += weightShape.totalSize
         }
         
         //  If using a bias term, add the bias variable
@@ -195,6 +199,7 @@ public class FullyConnectedLayer : UnaryNode {
             if let lossNode = lossNode {
                 let learningVariable = LearningVariable(variable: node, tensor: biasTensor!, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
                 graph.learningVariables.append(learningVariable)
+                totalParameterCount += biasShape.totalSize
             }
        }
         
@@ -308,5 +313,9 @@ public class FullyConnectedLayer : UnaryNode {
         self.learningOptimizer = using
         self.gradientClipping = gradientClipping
         return self
+    }
+    
+    override func getNumberOfParameters() throws -> Int {
+        return totalParameterCount
     }
 }

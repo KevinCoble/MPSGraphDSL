@@ -215,6 +215,8 @@ public class Variable : Node {
     var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
     var gradientClipping: (min: Double, max: Double)? = nil
     var referenceTensor: Tensor? = nil
+    
+    var totalParameterCount: Int = 0
 
     /// Construct a Variable node with shape, type,  and initial values from a ``Tensor``
     /// - Parameters:
@@ -304,6 +306,8 @@ public class Variable : Node {
     override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
         let tensor: Tensor?
         
+        totalParameterCount = 0
+        
         //  Get the data tensor
         switch (valueSource) {
         case .tensor(let sourceTensor):
@@ -376,6 +380,7 @@ public class Variable : Node {
         if let lossNode = lossNode {
             let learningVariable = LearningVariable(variable: self, tensor: variable, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
             graph.learningVariables.append(learningVariable)
+            totalParameterCount += shape!.totalSize
         }
         
         //  Return the created MPSGraphTensor
@@ -451,6 +456,10 @@ public class Variable : Node {
         case .inputTensor:
             return nil
         }
+    }
+    
+    override func getNumberOfParameters() throws -> Int {
+        return totalParameterCount
     }
 }
 

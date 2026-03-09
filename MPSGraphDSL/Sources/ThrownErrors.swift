@@ -29,6 +29,8 @@ public enum GenericMPSGraphDSLErrors : Error {
     case InternalError
     ///  The data type passed in is not usable by MPSGraph
     case TypeNotUsableByGraph
+    /// The count value for a repeat block was outside of the valid range 2...20
+    case InvalidInRepeatCount
 }
 
 
@@ -138,6 +140,12 @@ public enum MPSGraphDSLErrors : Error {
     case NaNPropogationNotSupported
     ///  The node in question does not support the operation among multiple dimensions.
     case MultipleDimensionsNotSupported
+    ///  A RepeatTensorName node was used outside of a Repeat block.  They can only be used as Repeat circular reference nodes
+    case RepeatTensorNameUsedOutsideOfRepeatBlock
+    ///  A RepeatTensorName with a duplicate reference name was found
+    case RepeatTensorNameReferenceNameDuplicated
+    ///  A RepeatTensorName had an initial name that was not found in the previous noded
+    case RepeatTensorNameInitialNameNotFound
 }
 
 ///  Errors that can be thrown by the MPSGraph building system when dealing with neural network layers

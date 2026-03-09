@@ -10,7 +10,7 @@ import MetalPerformanceShaders
 import MetalPerformanceShadersGraph
 
 
-///   Node that adds an instance of a SubGraphDefinition to another Graph or SubGraph
+///   Node that adds an If-then-else block to a Graph
 public class If : UnaryNode {
     let thenBlock: Then
     let elseBlock: Else
@@ -27,15 +27,27 @@ public class If : UnaryNode {
         //  Get the predicate tensor
         let predicateTensor = try graph.getUnaryTensor(name: inputName)
         
+        //  Put the then name onto the name prefix
+        graph.setNewCurrentPrefix("if_then_"  + name! + "_" + graph.currentNamePrefix)
+
         //  Put the 'then' block nodes into the graph
-        try graph.processNodes(thenBlock.nodes, block: "if_then_" + name!)
+        try graph.processNodes(thenBlock.nodes, block: "if_then_" + name!, controlBlock: true)
         
+        //  Put back the previous prefix
+        graph.popLastFromPrefixStack()
+
         //  Get the 'then' return tensors
         let thenReturnTensors = try graph.getReturnTensors()
         
+        //  Put the else name onto the name prefix
+        graph.setNewCurrentPrefix("if_else_"  + name! + "_" + graph.currentNamePrefix)
+
         //  Put the 'else' block nodes into the graph
-        try graph.processNodes(elseBlock.nodes, block: "if_else_" + name!)
+        try graph.processNodes(elseBlock.nodes, block: "if_else_" + name!, controlBlock: true)
         
+        //  Put back the previous prefix
+        graph.popLastFromPrefixStack()
+
         //  Get the 'else' return tensors
         let elseReturnTensors = try graph.getReturnTensors()
 
@@ -114,18 +126,3 @@ public enum ThenElseBuilder {
         return component
     }
 }
-
-
-
-//let ifTensor = mpsgraph.constant(0.0, shape: [1 as NSNumber], dataType: .int32)
-//let outsideTensor = mpsgraph.constant(1.0, shape: [1 as NSNumber], dataType: .float32)
-//let ifResult = mpsgraph.if(ifTensor, then: { () -> [MPSGraphTensor] in
-//        // Block to execute if condition is true (e.g., return Tensor A)
-//        let thenTensor = mpsgraph.constant(2.0, shape: [1 as NSNumber], dataType: .float32)
-//        return [thenTensor]
-//    }, else: { () -> [MPSGraphTensor] in
-//        // Block to execute if condition is true (e.g., return Tensor A)
-//        let elseTensor = mpsgraph.constant(3.0, shape: [1 as NSNumber], dataType: .float32)
-//        return [elseTensor]
-//    }, name: "if")
-//let addition = mpsgraph.addition(outsideTensor, ifResult[0], name: "addition")

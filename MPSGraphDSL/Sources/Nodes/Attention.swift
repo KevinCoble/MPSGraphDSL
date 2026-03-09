@@ -72,6 +72,8 @@ public class SelfAttention : UnaryNode {
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
+    
+    var totalParameterCount: Int = 0
 
     /// Constructor for an optionally masked self attention layer
     /// - Parameters:
@@ -92,6 +94,7 @@ public class SelfAttention : UnaryNode {
         
         suffixes = []
         targetIndices = []
+        totalParameterCount = 0
         
         //  Get the input tensor
         var inputTensor = try graph.getUnaryTensor(name: inputName)
@@ -124,12 +127,14 @@ public class SelfAttention : UnaryNode {
         addedTensors.append(contentsOf: addedKeyItems.addedTensors)
         suffixes.append(contentsOf: addedKeyItems.addedSuffixes)
         let keyTensor = addedKeyItems.addedTensors.last!
-        
+        totalParameterCount += addedKeyItems.addedParameters
+
         //  Add the query generation layer
         let addedQueryItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: inputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: queryWeightInitialization, hasBias: queryHasBias, biasInitialValue: queryBiasInitialValue, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer, name: name!, suffix: "_query")
         addedTensors.append(contentsOf: addedQueryItems.addedTensors)
         suffixes.append(contentsOf: addedQueryItems.addedSuffixes)
         let queryTensor = addedQueryItems.addedTensors.last!
+        totalParameterCount += addedQueryItems.addedParameters
 
         //  If masked, create a mask tensor
         var mask: MPSGraphTensor? = nil
@@ -152,7 +157,8 @@ public class SelfAttention : UnaryNode {
         addedTensors.append(contentsOf: addedValueItems.addedTensors)
         suffixes.append(contentsOf: addedValueItems.addedSuffixes)
         let valueTensor = addedValueItems.addedTensors.last!
-        
+        totalParameterCount += addedValueItems.addedParameters
+
         //  Get the scaling constant
         let scaledConstant = 1.0 / sqrt(Double(headSize))
 
@@ -335,9 +341,10 @@ public class SelfAttention : UnaryNode {
         return self
     }
 
-    internal static func addFullyConnectedBlock(graph: Graph, inputTensor: MPSGraphTensor, tokenSize: Int, blockSize: Int, outputSize: Int, numHeads: Int, dataType: MPSDataType, weightInitialization: WeightInitialization, hasBias: Bool, biasInitialValue: Double, loss: String?, clipping: (min: Double, max: Double)?, optimizer: LearningOptimizer, name: String, suffix: String) throws -> (addedTensors: [MPSGraphTensor], addedSuffixes: [String]) {
+    internal static func addFullyConnectedBlock(graph: Graph, inputTensor: MPSGraphTensor, tokenSize: Int, blockSize: Int, outputSize: Int, numHeads: Int, dataType: MPSDataType, weightInitialization: WeightInitialization, hasBias: Bool, biasInitialValue: Double, loss: String?, clipping: (min: Double, max: Double)?, optimizer: LearningOptimizer, name: String, suffix: String) throws -> (addedTensors: [MPSGraphTensor], addedSuffixes: [String], addedParameters: Int) {
         var addedTensors: [MPSGraphTensor] = []
         var addedSuffixes: [String] = []
+        var addedParameters = 0
 
         //  Add the weights variable
         let weightShape = TensorShape([numHeads, tokenSize, outputSize])
@@ -360,6 +367,7 @@ public class SelfAttention : UnaryNode {
         if let lossNode = loss {
             let learningVariable = LearningVariable(variable: node, tensor: weightTensor, loss: lossNode, clipping: clipping, optimizer: optimizer)
             graph.learningVariables.append(learningVariable)
+            addedParameters += weightShape.totalSize
         }
         
         //  Add the matrix multiply
@@ -379,7 +387,7 @@ public class SelfAttention : UnaryNode {
             let biasTensor = graph.mpsgraph.variable(with: biasData, shape: biasShape.getMPSShape(), dataType: weightType.getMPSDataType(), name: biasName)
             addedSuffixes.append(suffix + "_biases")
             addedTensors.append(biasTensor)
-            
+
             //  If we are adding load or reset assignments, put this variable on the list for load assignments
             let node = Variable(dataType: weightType, shape: biasShape, initialValue: biasInitialValue, name: biasName)
             if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
@@ -391,6 +399,7 @@ public class SelfAttention : UnaryNode {
             if let loss = loss {
                 let learningVariable = LearningVariable(variable: node, tensor: biasTensor, loss: loss, clipping: clipping, optimizer: optimizer)
                 graph.learningVariables.append(learningVariable)
+                addedParameters += biasShape.totalSize
             }
 
             let finalTensorName = name + suffix
@@ -399,7 +408,11 @@ public class SelfAttention : UnaryNode {
             addedSuffixes.append(suffix)
         }
 
-        return (addedTensors: addedTensors, addedSuffixes: addedSuffixes)
+        return (addedTensors: addedTensors, addedSuffixes: addedSuffixes, addedParameters: addedParameters)
+    }
+    
+    override func getNumberOfParameters() throws -> Int {
+        return totalParameterCount
     }
 }
 
@@ -429,6 +442,8 @@ public class CrossAttention : BinaryNode {
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
+    
+    var totalParameterCount: Int = 0
 
     /// Constructor for an optionally masked self attention layer
     /// - Parameters:
@@ -450,7 +465,8 @@ public class CrossAttention : BinaryNode {
         
         suffixes = []
         targetIndices = []
-        
+        totalParameterCount = 0
+
         //  Get the input tensors
         let inputTensors = try graph.getBinaryTensors(firstInputName, secondInputName)
         var inputShape: TensorShape
@@ -494,12 +510,14 @@ public class CrossAttention : BinaryNode {
         addedTensors.append(contentsOf: addedKeyItems.addedTensors)
         suffixes.append(contentsOf: addedKeyItems.addedSuffixes)
         let keyTensor = addedKeyItems.addedTensors.last!
-        
+        totalParameterCount += addedKeyItems.addedParameters
+
         //  Add the query generation layer
         let addedQueryItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: firstInputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: queryWeightInitialization, hasBias: queryHasBias, biasInitialValue: queryBiasInitialValue, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer, name: name!, suffix: "_query")
         addedTensors.append(contentsOf: addedQueryItems.addedTensors)
         suffixes.append(contentsOf: addedQueryItems.addedSuffixes)
         let queryTensor = addedQueryItems.addedTensors.last!
+        totalParameterCount += addedQueryItems.addedParameters
 
         //  If masked, create a mask tensor
         var mask: MPSGraphTensor? = nil
@@ -522,7 +540,8 @@ public class CrossAttention : BinaryNode {
         addedTensors.append(contentsOf: addedValueItems.addedTensors)
         suffixes.append(contentsOf: addedValueItems.addedSuffixes)
         let valueTensor = addedValueItems.addedTensors.last!
-        
+        totalParameterCount += addedValueItems.addedParameters
+
         //  Get the scaling constant
         let scaledConstant = 1.0 / sqrt(Double(headSize))
 
@@ -704,5 +723,9 @@ public class CrossAttention : BinaryNode {
         self.learningOptimizer = using
         self.gradientClipping = gradientClipping
         return self
+    }
+    
+    override func getNumberOfParameters() throws -> Int {
+        return totalParameterCount
     }
 }

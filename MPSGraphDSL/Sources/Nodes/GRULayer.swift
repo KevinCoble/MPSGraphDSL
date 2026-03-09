@@ -121,6 +121,8 @@ public class GRULayer: UnaryNode {
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
+    
+    var totalParameterCount: Int = 0
 
     /// Constructor for an GRU layer.
     /// State size is passed in.  Number of features and number of inputs are determined from the input tensor
@@ -147,6 +149,7 @@ public class GRULayer: UnaryNode {
         
         suffixes = []
         targetIndices = []
+        totalParameterCount = 0
         
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
@@ -199,6 +202,7 @@ public class GRULayer: UnaryNode {
         if let lossNode = lossNode {
             let learningVariable = LearningVariable(variable: node, tensor: rweightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
             graph.learningVariables.append(learningVariable)
+            totalParameterCount += rweightsShape.totalSize
         }
         
         //  Add the input weights variable
@@ -221,6 +225,7 @@ public class GRULayer: UnaryNode {
         if let lossNode = lossNode {
             let learningVariable = LearningVariable(variable: node, tensor: iweightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
             graph.learningVariables.append(learningVariable)
+            totalParameterCount += iweightsShape.totalSize
         }
         
         //  Add the bias variable
@@ -243,6 +248,7 @@ public class GRULayer: UnaryNode {
         if let lossNode = lossNode {
             let learningVariable = LearningVariable(variable: node, tensor: biasTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
             graph.learningVariables.append(learningVariable)
+            totalParameterCount += biasShape.totalSize
         }
         
         //  Create the descriptor
@@ -372,5 +378,9 @@ public class GRULayer: UnaryNode {
         self.learningOptimizer = using
         self.gradientClipping = gradientClipping
         return self
+    }
+    
+    override func getNumberOfParameters() throws -> Int {
+        return totalParameterCount
     }
 }

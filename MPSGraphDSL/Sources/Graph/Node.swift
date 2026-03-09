@@ -77,4 +77,9 @@ public class Node {
             throw MPSGraphDSLErrors.UnreferencedNode("Node: \(opName) name: \(nameString)")
         }
     }
+    
+    internal func getNumberOfParameters() throws -> Int {
+        //  Nodes can override this to get the parameters they (or their-sub-nodes) add to the graph
+        return 0
+    }
 }

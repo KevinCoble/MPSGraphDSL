@@ -101,6 +101,8 @@ public class ConvolutionLayer: UnaryNode {
     var suffixes: [String] = []
     var targetIndices: [Int] = []
     
+    var totalParameterCount: Int = 0
+
     var testWeights = false
 
     /// Constructor for a 2D convolution layer.
@@ -122,7 +124,7 @@ public class ConvolutionLayer: UnaryNode {
         switch (activationFunction) {
             case .none, .tanh, .sigmoid:
                 weightInitialization = .XavierGlorotNormal
-            case .relu, .leakyRelu, .leakyReluFromTensor, .gelu:
+            case .relu, .leakyRelu, .leakyReluFromTensor, .gelu, .elu:
                 weightInitialization = .HeNormal
         }
         super.init(input: input, name: name)
@@ -149,7 +151,7 @@ public class ConvolutionLayer: UnaryNode {
         switch (activationFunction) {
             case .none, .tanh, .sigmoid:
                 weightInitialization = .XavierGlorotNormal
-            case .relu, .leakyRelu, .leakyReluFromTensor, .gelu:
+            case .relu, .leakyRelu, .leakyReluFromTensor, .gelu, .elu:
                 weightInitialization = .HeNormal
         }
         super.init(input: input, name: name)
@@ -160,7 +162,8 @@ public class ConvolutionLayer: UnaryNode {
         
         suffixes = []
         targetIndices = []
-        
+        totalParameterCount = 0
+
         //  See if we have an activation function
         let haveActivationFunction: Bool
         switch (activationFunction) {
@@ -212,6 +215,7 @@ public class ConvolutionLayer: UnaryNode {
                 if let lossNode = lossNode {
                     let learningVariable = LearningVariable(variable: node, tensor: biasTensor!, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
                     graph.learningVariables.append(learningVariable)
+                    totalParameterCount += biasShape.totalSize
                 }
             }
             suffixes.append("_biases")
@@ -299,6 +303,7 @@ public class ConvolutionLayer: UnaryNode {
                 if let lossNode = lossNode {
                     let learningVariable = LearningVariable(variable: node, tensor: weightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
                     graph.learningVariables.append(learningVariable)
+                    totalParameterCount += weightShape.totalSize
                 }
             }
             suffixes.append("_weights")
@@ -540,6 +545,7 @@ public class ConvolutionLayer: UnaryNode {
                 if let lossNode = lossNode {
                     let learningVariable = LearningVariable(variable: node, tensor: weightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
                     graph.learningVariables.append(learningVariable)
+                    totalParameterCount += weightShape.totalSize
                 }
             }
             suffixes.append("_weights")
@@ -807,5 +813,9 @@ public class ConvolutionLayer: UnaryNode {
     internal func useTestWeights() -> ConvolutionLayer {
         testWeights = true
         return self
+    }
+    
+    override func getNumberOfParameters() throws -> Int {
+        return totalParameterCount
     }
 }

@@ -111,6 +111,8 @@ public class RNNLayer: UnaryNode {
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
+    
+    var totalParameterCount: Int = 0
 
     /// Constructor for an RNN layer.
     /// State size is passed in.  Number of features and number of inputs are determined from the input tensor
@@ -137,7 +139,8 @@ public class RNNLayer: UnaryNode {
         
         suffixes = []
         targetIndices = []
-        
+        totalParameterCount = 0
+
         //  Get the input tensor
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         let weightType = DataType(from: inputTensor.dataType)
@@ -183,6 +186,7 @@ public class RNNLayer: UnaryNode {
         if (graph.buildOptions.contains(.addLoadAssigns) || graph.buildOptions.contains(.addResetAssigns)) {
             let loadResetAssignInfo = LoadResetAssignInfo(node: node, variableTensor: rweightTensor, sourceTensor: nil)
             graph.loadResetAssignList.append(loadResetAssignInfo)
+            totalParameterCount += rweightsShape.totalSize
         }
         
         //  If this is a learning layer - add the recurrent weights to the list to get assignment operations for
@@ -211,6 +215,7 @@ public class RNNLayer: UnaryNode {
         if let lossNode = lossNode {
             let learningVariable = LearningVariable(variable: node, tensor: iweightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
             graph.learningVariables.append(learningVariable)
+            totalParameterCount += iweightsShape.totalSize
         }
         
         //  Add the bias variable
@@ -233,6 +238,7 @@ public class RNNLayer: UnaryNode {
         if let lossNode = lossNode {
             let learningVariable = LearningVariable(variable: node, tensor: biasTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
             graph.learningVariables.append(learningVariable)
+            totalParameterCount += biasShape.totalSize
         }
         
         //  Create the descriptor
@@ -341,5 +347,9 @@ public class RNNLayer: UnaryNode {
         self.learningOptimizer = using
         self.gradientClipping = gradientClipping
         return self
+    }
+    
+    override func getNumberOfParameters() throws -> Int {
+        return totalParameterCount
     }
 }

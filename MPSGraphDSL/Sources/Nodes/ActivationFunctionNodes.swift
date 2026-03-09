@@ -140,12 +140,65 @@ public class GELU : UnaryNode {
         let sqrtTwoTensor = graph.mpsgraph.squareRoot(with: twoTensor, name: nil)
         let xOverSqrtTwo = graph.mpsgraph.division(inputTensor, sqrtTwoTensor, name: nil)
         let errorFunc = graph.mpsgraph.erf(with: xOverSqrtTwo, name: nil)
-        let oneTensor = graph.mpsgraph.constant(1.0, shape: [1 as NSNumber], dataType: inputType)
+        let oneTensor = graph.getOneTensor(type: DataType(from: inputType))
         let errorFuncPlusOne = graph.mpsgraph.addition(oneTensor, errorFunc, name: nil)
         let timesX = graph.mpsgraph.multiplication(inputTensor, errorFuncPlusOne, name: nil)
         let GELUResult = graph.mpsgraph.division(timesX, twoTensor, name: nil)
 
         return GELUResult
+    }
+}
+
+///   Node to perform the ELU activation function on the input tensor
+public class ELU : UnaryNode {
+    let alpha: Double
+    
+    ///  Constructor for a ELU (Exponential Linear Unit) operation
+    ///
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - name: (Optional) The name for this node and its associated tensor
+    public init(input: String? = nil, alpha: Double, name: String? = nil) {
+        self.alpha = alpha
+        super.init(input: input, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+        
+        let ELUResult = ELU.addELU(graph: graph, inputTensor: inputTensor, alpha: alpha)
+        
+        //  Remember the output tensor and shape for later
+        return [ELUResult]
+    }
+    
+    internal static func addELU(graph: Graph, inputTensor: MPSGraphTensor, alpha: Double) -> MPSGraphTensor {
+        let inputType = inputTensor.dataType
+        
+        //  Add to the graph itself
+        
+        //  Get the zero and one tensors
+        let zeroTensor = graph.getZeroTensor(type: DataType(from: inputType))
+        let oneTensor = graph.getOneTensor(type: DataType(from: inputType))
+        
+        //  Exponentiate the input
+        let expX = graph.mpsgraph.exponent(with: inputTensor, name: nil)
+        
+        //  Subtract 1
+        let expXminusOne = graph.mpsgraph.subtraction(expX, oneTensor, name: nil)
+
+        //  Multiply by alpha
+        let alphaTensor = graph.mpsgraph.constant(alpha, shape: [1 as NSNumber], dataType: inputType)
+        let negResult = graph.mpsgraph.division(expXminusOne, alphaTensor, name: nil)
+        
+        //  Find if we are positive or negative
+        let negative = graph.mpsgraph.lessThanOrEqualTo(inputTensor, zeroTensor, name: nil)
+        
+        //  Select based on positive or negative value
+        let ELUResult = graph.mpsgraph.select(predicate: negative, trueTensor: negResult, falseTensor: inputTensor, name: nil)
+
+        return ELUResult
     }
 }
 
@@ -158,6 +211,7 @@ public enum ActivationFunction {
     case leakyRelu(Double)
     case leakyReluFromTensor(String)
     case gelu
+    case elu(Double)
 
     func addActivation(graph: Graph, inputTensor: MPSGraphTensor, name: String?) throws -> MPSGraphTensor? {
         switch (self) {
@@ -186,6 +240,9 @@ public enum ActivationFunction {
             case .gelu:
                 let geluResult = GELU.addGELU(graph: graph, inputTensor: inputTensor)
                 return geluResult
+            case .elu(let alpha):
+            let eluResult = ELU.addELU(graph: graph, inputTensor: inputTensor, alpha: alpha)
+                return eluResult
         }
 
     }

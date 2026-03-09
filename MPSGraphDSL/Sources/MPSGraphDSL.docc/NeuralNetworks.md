@@ -16,6 +16,7 @@ The following composite nodes are available:
 | ``PoolingLayer``         | A pooling layer, with three possible pooling functions.  Tensor ranks are managed (MPSGraph requires 4D inputs)|
 | ``ConvolutionLayer``     | A convolution layer, with two-dimensional or three-dimensional kernels.  Tensor ranks are managed (MPSGraph requires 4D or 5D inputs)|
 | ``BatchNormalization``   | A node to batch normalize the outputs of a previous layer.  Weights, biases, mean, and variance tensors are managed|
+| ``LayerNormalization``   | A node to normalize the outputs of a previous layer.  Weights and biases tensors are managed                  |
 | ``SelfAttention``        | A node to create a (possibly multi-headed) self-attention layer                                               |
 | ``CrossAttention``       | A node to create a (possibly multi-headed) cross-attention layer                                              |
 
@@ -32,10 +33,27 @@ The following initializer is used in a Graph (or SubGraph) definition to add a M
 ```swift
 MeanSquaredErrorLoss(actual: String? = nil, predicted: String? = nil, name: String? = nil)
 ```
-
 The actual and predicted inputs are names of tensors (or if nil it assumes the previous node's tensor) for the actual output (usually a ``PlaceHolder`` with the output tensor of a ``DataSet``) and the networks predicted output
 
-Creating a ``MeanAbsoluteErrorLoss`` is createdthe same way, but uses the MeanAbsoluteErrorLoss node name instead.
+Creating a ``MeanAbsoluteErrorLoss`` is created the same way, but uses the MeanAbsoluteErrorLoss node name instead.
+
+### Activation Functions
+
+Many neural network layers take an activation function - a nonlinear function that is applied at the end of the layer operations.  These functions can be selected as part of the layer, or added individually.  Batch or Layer normalization is often added between the base layer and the activation function.  To do this select the activation type '.none', add the normalization after the neural network node, then manually add the activation function.
+
+The following activation functions are supported:
+
+| Activation Function                 | Enumeration |   Node  |
+| ------------------------------------| ----------- | ----------- |
+|  None                               |  .none     | N/A |
+|  Rectified Linear Unit (ReLU)       |  .relu     | ReLU |
+|  Hyperbolic Tangent (tanh)          |  .tanh     | HyperbolicTangent |
+|  Sigmoid (σ)                        |  .sigmoid  | Sigmoid |
+|  Leaky ReLU                         |  .leakyRelu(alpha)     | LeakyReLU |
+|  Leaky ReLU from Tensor             |  .leakyRelu(tensor)    | LeakyReLU |
+|  Gaussian Error Linear Unit (GELU)  |  .grelu     | GELU |
+|  Exponential Linear Unit (ELU)      |  .elu(alpha)     | ELU |
+
 
 ### FullyConnectedLayer
 
@@ -573,6 +591,63 @@ These tensors can be referenced using the name of the node with the suffix added
 ####  Additional Data in the BatchNormalization Layer
 
 The batch normalization process uses a calculated mean and variance of the batch of input data to normalize those values.  The running average of those two calculations are determined during training, and those averages are used in non-learning (inference) modes.  The running mean and variance variables, while not specifically 'learned', should be saved after training along with any other learned weights (such as the beta and gamma tensors of the batch normalization layer) and placed back into the variables for inference - if the graph is reloaded after training.  The running mean and variance tensors are added to the load-reset variable list automatically by the node.
+
+### LayerNormalization
+
+A batch normalization layer is a standard neural network layer often put after a fully-connected or convolution layer.  It is used to speed training by normalizing the outputs of the previous layer, applying learned scaling and shifting values to each feature of the input tensor.
+
+The batch normalization layer is often put before the activation portion of the previous layer.  To allow for this the LayerNormalization node accepts an activation function that will be performed after the normalization function.  Just set the activation of the previous layer to '.none' and that layers activation function to the LayerNormalization layer.
+
+####  Creating a LayerNormalization Layer
+
+The following initializer is used in a Graph (or SubGraph) definition to add a LayerNormalization layer:
+
+```swift
+LayerNormalization(input: String? = nil, ϵ: Double = 1.0e-5, momentum: Double = 0.9, featureDimensions: [Int]? = nil, activationFunction: ActivationFunction = .none, name: String)
+```
+
+The input tensor and node name are standard parameters.  See the article on Creating Graphs for more information.
+
+The ϵ and momentum parameters are the standard batch normalization parameters of the same name.  Please see other documentation on batch normalization for more discussion of their use and standard values than is possible in this document.  The default values are those that are most commonly used.
+
+The featureDimensions parameter is an optional array of dimension indices giving the axes of the input tensor that are considered 'feature' dimensions.  Non-feature dimensions are combined in the mean/variance calculations of the batch normalization.  If the graph is created as a batch graph the first dimension (index 0) will be automatically added as a non-feature dimension.  If the previous layer is a fully-connected layer, all output dimensions (except the possible batch dimension) are feature dimensions.  If the previous layer is convolution layer, you will need to specify the feature layers, as the row-column-depth dimensions are generally not feature dimensions.  The feature dimension location on convolution layers can be moved with a modifier, so it cannot easily be determined by this layer.  An example of a convolution output format is NHWC - batch x height x width x channel.  The channel dimension is the only feature dimension, so you would pass a \[3\] for the featureDimensions parameter.
+
+The activation function is selected from the enumeration ``ActivationFunction``.  To turn off activation, select the option '.none'.
+
+####  Modifiers for a LayerNormalization Layer
+
+The following modifier is available for the LayerNormalization node:
+
+| Modifier            | Description |
+| ----------------------------------| ----------- |
+|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+
+As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the LayerNormalization node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
+
+####  Tensors Added by a LayerNormalization Layer
+
+The following tensors are added to the Graph by the node:
+
+| Suffix                | Targetted | Description |
+| --------------------- | --------- | ---------------------- |
+| "_gamma"              |     No     | The learned gamma scaling variable        |
+| "_beta"               |     No     | The learned beta offset variable        |
+| "_ϵ"                  |     No     | The provided epsilon constant  |
+| "_momentum"           |     No     | The provided momentum constant        |
+| "_mean"      |     No     | The calculated mean of the current inputs        |
+| "_variance"  |     No     | The calculated variance of the current inputs        |
+| "_numerator" |     No     | The numerator of the batch normalization x-hat calculation       |
+| "_variance_plus_epsilon" |     No     | The sumation of the variance plus epsilon constant     |
+| "_denominator" |     No     | The denominator of the normalization x-hat calculation       |
+| "_x_hat"     |     No     | The x-hat calculation        |
+| "_gamma_times_x_hat" |     No     | x-hat times the learned gamma variable        |
+| "_layerNormalization"|    Yes     | The layer normalization output.  If no activation function there will be no suffix on this tensor  |
+| None.                |    Yes     | (If configured) The activation function.  Set as a target if node configured as target       |
+
+Note:  Any of the above tensors that can become the target will have their suffix removed (named with just the layer's node name) when they are the target tensor.  This makes the name of the output of the node the same regardless of configuration.
+
+These tensors can be referenced using the name of the node with the suffix added.
+
 
 ### SelfAttention
 

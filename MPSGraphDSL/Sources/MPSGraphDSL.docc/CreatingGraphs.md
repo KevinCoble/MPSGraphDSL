@@ -485,3 +485,49 @@ Else {
 Note that the nodes in the 'Then' and 'Else' blocks have 'blockReturnIndex' modifiers on them.  This makes the tensors from those nodes the return tensors for the block.  The order of the returned tensors is given by the integer passed in the modifier.  If the node being modified results in more than one tensor, all tensors are returned, and given sequential return index numbers.  For example if a modifier of 'blockReturnIndex(1)' was added to a node that returns two tensors, those tensors would be returned from the block as the second (index 1) and third (index 2) tensors in the return list.
 
 The returned tensors from a multiple-tensor If node are labelled with the node name and suffixes "_0", "_1", "_2", etc.
+
+
+##  Repeat Block
+
+Sometimes you want to repeat a series of nodes, referenced here as a'block', multiple times without changing specifiec parameters.  To make it easy to do this, MPSGraphDSL includes a node called a ``Repeat`` block.  A Repeat block takes a repeat count and a series of nodes and repeats those nodes as specified in the passed in count.  An example follows:
+
+```swift
+let graph = Graph {
+    Constant(shape: [1], value: Float32(2), name: "two")
+    Constant(shape: [1], value: Float32(3), name: "three")
+    Repeat(3) {
+        Addition(secondInput: "two", name: "addition")
+    }
+    Identity(name: "result")        //  Get the last repeat node and make it a target
+        .targetForModes(["repeatTest"])
+}
+```
+
+This Graph defines two constants, then repeats the Addition three times.  The Addition block has nil as the first input tensor.  This indicates the previous tensor as the input.  In this example, the result tensor would contain the value 9 (((3 + 2) + 2) + 2), as the first Addition gets the "three" node as input (the last node before the Repeat block), then the second one gets the result of the first Addition, and the last gets the result of the second Addition.
+
+The last actual calculation is the third Addition node.  However, if you target that, all three Addition nodes added will be targets.  To avoid that an Identity operation is added after the Repeat block.  The Identity node just emits the input tensor.  In this case, the input is specified as nil, so the last node - the third Addition node - is emitted.  The Identity node can then be targetted so that only the last calculation is returned.
+
+### RepeatTensorName
+
+The nil input name auto-referencing the last node works great if you only need one tensor passing through each of the loops.  If you need more than one in the repeated calculation you can use a RepeatTensorName node.  The following example shows one in use:
+
+```swift
+let graph = Graph {
+    Constant(shape: [1], value: Float32(2), name: "two")
+    Constant(shape: [1], value: Float32(3), name: "three")
+    Repeat(3) {
+        RepeatTensorName(initialName: "two", repeatName: "addition", referenceName: "blockInput")
+        Addition(firstInput: "blockInput", secondInput: "three", name: "addition")
+    }
+    Identity(name: "result")        //  Get the last repeat node and make it a target
+        .targetForModes(["repeatTest"])
+}
+```
+
+The first Addition node in this example wants to start with the "two" tensor then add the "three" tensor to it.  The second and third Additions want to use the result of the previous block iteration and add another three to it.  The differenct between the first and later instances of the Addition node is the first parameter - it should be the "two" tensor on the first iteration, and the previous "addition" tensor on subsequent iterations.
+
+The RepeatTensorName does just that.  The first parameter is the name of the tensor for the first iteration.  In this example that is the "two" tensor.  The second parameter is the name of the tensor for all other iterations - the "addition" tensor is used.  Note that the RepeatTensorName node is before the Addition node, so when it looks for the "addition" tensor it will get the one from the previous iteration, as the current iteration hasn't added one yet.  The last paramater of the RepeatTensorName is the reference name, the name later nodes in the Repeat block can use to reference the selected tensor as an input.
+
+The result of this example is a value of 11 (((2 + 3) + 3) + 3).
+
+The RepeatTensorName throws an error if used outside a Repeat block.
