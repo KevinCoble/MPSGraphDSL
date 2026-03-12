@@ -63,13 +63,14 @@ public class Repeat : Node {
         graph.repeatReferences = repeatReferences
         
         //  Add the nodes multiple times
+        let currentNamePrefix = graph.currentNamePrefix
         let previousFirstRepeatBlock = graph.firstRepeatBlock
         for i in 0..<numTimes {
             //  Set the 'firstRepeatBlock' flag used by RepeatTensorName nodes
             graph.firstRepeatBlock = (i == 0)
             
             //  Put this node name onto the name prefix
-            graph.setNewCurrentPrefix(blockName + "\(i+1)_" + graph.currentNamePrefix)
+            graph.setNewCurrentPrefix(blockName + "\(i+1)_" + currentNamePrefix)
             
             //  Process the nodes
             try graph.processNodes(filteredNodes, block: blockName + "\(i+1)")

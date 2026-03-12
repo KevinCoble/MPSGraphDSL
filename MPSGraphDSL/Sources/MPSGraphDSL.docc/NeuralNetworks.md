@@ -667,7 +667,7 @@ The input tensor and node name are standard parameters.  See the article on Crea
 
 The headSize parameter sets the size of the three projection matrices.  A (non-batched) input of \[numTokens, embeddingSize\] will create a projection of \[numTokens, headSize\], which will be the output shape as well, if there is only one head in the layer.
 
-The numHeads parameter sets the number of independent attention heads in the layer.  The output of the layer will be \[numHeads, numTokens, headSize\].  Other libraries concatenate the head outputs together.  MPSGraphDSL does not do this, but it is a simple operation to do so if that is desired.
+The numHeads parameter sets the number of independent attention heads in the layer.  The output of the layer will be \[numHeads, numTokens, headSize\].  Other libraries concatenate the head outputs together.  MPSGraphDSL does not do this since often a FullyConnectedLayer is used afterwards, which can look at both dimensions for input, but it is a simple operation to do so if that is desired.
 
 The masked parameter is a boolean that determines if a matrix of negative infinity values in the upper-right triangle is added to the multiplied Query and Key projections.  Doing so will remove (set to 0) the values when they are passed through the SoftMax operation.  This is often done to keep tokens from interacting with later (future) tokens in the token sequence list.
 

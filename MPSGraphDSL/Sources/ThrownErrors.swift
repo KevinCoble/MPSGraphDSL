@@ -170,6 +170,8 @@ public enum MPSGraphNeuralNetErrors : Error {
     case OrthogonalizationOnNonFloatingTensor
     ///  Unable to get token block size
     case UnableToGetTokenBlockSize
+    ///  Attention input shapes must be two-dimensional (or 3 with batch) - numTokens x embeddingSize
+    case AttentionInputShapeNot2D
     ///  Cross-Attention input shapes must match
     case CrossAttentionInputShapesMismatch
 }

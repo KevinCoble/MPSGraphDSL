@@ -45,6 +45,8 @@ import MetalPerformanceShadersGraph
 // Softmax x V                      [bs, hs]        [B, bs, hs]         [nh, bs, hs]        [B, nh, bs, hs]
 //
 // (If number of heads = 1, reshape to remove nh dimension at end)
+//
+// Transposed Attention                                                 [bs, nh, hs]        [B, bs, nh, hs]
 
 ///   Node for a self-attention layer
 ///         Token embedding size pulled from last dimension of input
@@ -102,6 +104,7 @@ public class SelfAttention : UnaryNode {
         if let shape = inputTensor.shape {
             //  If a batch graph, insert a "head" dimension - sized to 1 so it will be broadcast across the heads
             if (graph.batchGraph) {
+                if (shape.count != 3) { throw MPSGraphNeuralNetErrors.AttentionInputShapeNot2D }
                 let newShapeSizes: [Int] = [graph.batchSize, 1, Int(truncating: shape[shape.count-2]), Int(truncating: shape.last!)]
                 inputShape = TensorShape(newShapeSizes)
                 
@@ -110,6 +113,7 @@ public class SelfAttention : UnaryNode {
                 suffixes.append("_input_reshape")
             }
             else {
+                if (shape.count != 2) { throw MPSGraphNeuralNetErrors.AttentionInputShapeNot2D }
                 inputShape = TensorShape(fromMPS: shape)
             }
         }
@@ -208,22 +212,10 @@ public class SelfAttention : UnaryNode {
         addedTensors.append(softMax)
         suffixes.append("_softmax")
 
-        //  Get the attention layer name
-        let attentionName: String
-        if (numHeads > 1) {
-            //  Attention last layer
-            attentionName = name!
-            suffixes.append("")
-        }
-        else {
-            //  Attention last layer
-            attentionName = name! + "_scaledAttention"
-            suffixes.append("_scaledAttention")
-        }
-
         //  Multiply by the value
-        let attention = graph.mpsgraph.matrixMultiplication(primary: softMax, secondary: valueTensor, name: attentionName)
+        let attention = graph.mpsgraph.matrixMultiplication(primary: softMax, secondary: valueTensor, name: name! + "_scaledAttention")
         addedTensors.append(attention)
+        suffixes.append("_scaledAttention")
 
         //  If head count is 1, remove the head dimension
         if (numHeads == 1) {
@@ -233,6 +225,13 @@ public class SelfAttention : UnaryNode {
             
             let reshapedAttention = graph.mpsgraph.reshape( attention, shape: reshapeShape, name: name!)
             addedTensors.append(reshapedAttention)
+            suffixes.append("")
+        }
+        
+        //  If head count greater than 1, transpose block and head dimension so the head and headSize dimensions can be concatenated later
+        else {
+            let transposedAttention = graph.mpsgraph.transposeTensor(attention, dimension: -2, withDimension: -3, name: name!)
+            addedTensors.append(transposedAttention)
             suffixes.append("")
         }
 
@@ -592,22 +591,10 @@ public class CrossAttention : BinaryNode {
         addedTensors.append(softMax)
         suffixes.append("_softmax")
 
-        //  Get the attention layer name
-        let attentionName: String
-        if (numHeads > 1) {
-            //  Attention last layer
-            attentionName = name!
-            suffixes.append("")
-        }
-        else {
-            //  Attention last layer
-            attentionName = name! + "_scaledAttention"
-            suffixes.append("_scaledAttention")
-        }
-
         //  Multiply by the value
-        let attention = graph.mpsgraph.matrixMultiplication(primary: softMax, secondary: valueTensor, name: attentionName)
+        let attention = graph.mpsgraph.matrixMultiplication(primary: softMax, secondary: valueTensor, name: name! + "_scaledAttention")
         addedTensors.append(attention)
+        suffixes.append("_scaledAttention")
 
         //  If head count is 1, remove the head dimension
         if (numHeads == 1) {
@@ -617,6 +604,13 @@ public class CrossAttention : BinaryNode {
             
             let reshapedAttention = graph.mpsgraph.reshape( attention, shape: reshapeShape, name: name!)
             addedTensors.append(reshapedAttention)
+            suffixes.append("")
+        }
+        
+        //  If head count greater than 1, transpose block and head dimension so the head and headSize dimensions can be concatenated later
+        else {
+            let transposedAttention = graph.mpsgraph.transposeTensor(attention, dimension: -2, withDimension: -3, name: name!)
+            addedTensors.append(transposedAttention)
             suffixes.append("")
         }
 
