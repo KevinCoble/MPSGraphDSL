@@ -533,6 +533,37 @@ public final class CreateTensor {
             return try TensorBool(shape: newShape, initialValues: elements)
         }
     }
+    
+    /// Cast the tensor as the specified type.  Individual elements (except bool type) are just cast - no conversion math done (use map first if needed).  Bools are true if value > 0.5
+    /// - Parameters:
+    ///   - tensor: The tensor to cast to the new type
+    ///   - type: The data type to cast the tensor to
+    /// - Returns: The tensor of the same shape, of the specified type, with values cast (except bool) for conversion.  Bool is >= 0.5 is true, else false
+    public static func cast(_ tensor: Tensor, to type: DataType) throws -> Tensor {
+        //  Get the elements
+        let elements: [Double] = tensor.getElements()
+        
+        //  Create and return a tensor of the same shape, but different type
+        switch type {
+        case .uInt8:
+            let newElements: [UInt8] = elements.map{ UInt8($0) }
+            return try TensorUInt8(shape: tensor.shape, initialValues: newElements)
+        case .int32:
+            let newElements: [Int32] = elements.map{ Int32($0) }
+            return try TensorInt32(shape: tensor.shape, initialValues: newElements)
+        case .float16:
+            let newElements: [Float16] = elements.map{ Float16($0) }
+            return try TensorFloat16(shape: tensor.shape, initialValues: newElements)
+        case .float32:
+            let newElements: [Float32] = elements.map{ Float32($0) }
+            return try TensorFloat32(shape: tensor.shape, initialValues: newElements)
+        case .double:
+            return try TensorDouble(shape: tensor.shape, initialValues: elements)
+        case .bool:
+            let newElements: [Bool] = elements.map{ $0 >= 0.5 }
+            return try TensorBool(shape: tensor.shape, initialValues: newElements)
+        }
+    }
 }
 
 ///  A Tensor with elements of type Double (Not usable by MPSGraph)
@@ -878,6 +909,48 @@ public struct TensorDouble : Tensor {
         
         return data
     }
+    
+ 
+    // MARK: - Manipulation functions
+
+    /// Create a new tensor by running each element of this tensor through a passed in closure
+    /// - Parameter block: A closure of type (value: Double, index: Int, location: \[Int\]) -> Double, that can transform each element.  The value is the element at the index within the element list for the tensor.  The location is the array of dimension offsets for the element
+    /// - Returns: A tensor of the same shape and type with the modified values
+    public func map(block: (_ value: Double, _ index: Int, _ location: [Int]) -> Double) throws -> TensorDouble {
+        //  Get the location array initialized
+        let numDimensions = shape.numDimensions
+        var location: [Int] = Array(repeating: 0, count: numDimensions)
+        var index = 0
+        
+        //  Create an array for the updated elements
+        let totalSize = shape.totalSize
+        var newElements: [Double] = Array(repeating: 0.0, count: totalSize)
+        
+        //  Process each element
+        for element in elements {
+            //  Get the mapped value
+            newElements[index] = block(element, index, location)
+            
+            //  Update the index and the location
+            index += 1
+            if (index >= totalSize) { break }
+            var checkIndex = numDimensions - 1
+            location[checkIndex] += 1
+            while (checkIndex >= 0) {
+                if (location[checkIndex] >= shape.dimensions[checkIndex]) {
+                    location[checkIndex] = 0
+                    checkIndex -= 1
+                    if (checkIndex < 0) { break }
+                    location[checkIndex] += 1
+                }
+                else { break }
+            }
+        }
+        
+        //  Create and return the new tensor
+        return try TensorDouble(shape: shape, initialValues: newElements)
+    }
+
 }
 
 
@@ -1260,6 +1333,47 @@ public struct TensorFloat32 : Tensor {
         
         return data
     }
+    
+ 
+    // MARK: - Manipulation functions
+
+    /// Create a new tensor by running each element of this tensor through a passed in closure
+    /// - Parameter block: A closure of type (value: Float32, index: Int, location: \[Int\]) -> Float32, that can transform each element.  The value is the element at the index within the element list for the tensor.  The location is the array of dimension offsets for the element
+    /// - Returns: A tensor of the same shape and type with the modified values
+    public func map(block: (_ value: Float32, _ index: Int, _ location: [Int]) -> Float32) throws -> TensorFloat32 {
+        //  Get the location array initialized
+        let numDimensions = shape.numDimensions
+        var location: [Int] = Array(repeating: 0, count: numDimensions)
+        var index = 0
+        
+        //  Create an array for the updated elements
+        let totalSize = shape.totalSize
+        var newElements: [Float32] = Array(repeating: 0.0, count: totalSize)
+        
+        //  Process each element
+        for element in elements {
+            //  Get the mapped value
+            newElements[index] = block(element, index, location)
+            
+            //  Update the index and the location
+            index += 1
+            if (index >= totalSize) { break }
+            var checkIndex = numDimensions - 1
+            location[checkIndex] += 1
+            while (checkIndex >= 0) {
+                if (location[checkIndex] >= shape.dimensions[checkIndex]) {
+                    location[checkIndex] = 0
+                    checkIndex -= 1
+                    if (checkIndex < 0) { break }
+                    location[checkIndex] += 1
+                }
+                else { break }
+            }
+        }
+        
+        //  Create and return the new tensor
+        return try TensorFloat32(shape: shape, initialValues: newElements)
+    }
 }
 
 
@@ -1641,6 +1755,46 @@ public struct TensorFloat16 : Tensor {
         data = Data(bytes: elements, count: elementCount * MemoryLayout<Float16>.size)
         
         return data
+    }
+
+    // MARK: - Manipulation functions
+
+    /// Create a new tensor by running each element of this tensor through a passed in closure
+    /// - Parameter block: A closure of type (value: Float16, index: Int, location: \[Int\]) -> Float16, that can transform each element.  The value is the element at the index within the element list for the tensor.  The location is the array of dimension offsets for the element
+    /// - Returns: A tensor of the same shape and type with the modified values
+    public func map(block: (_ value: Float16, _ index: Int, _ location: [Int]) -> Float16) throws -> TensorFloat16 {
+       //  Get the location array initialized
+       let numDimensions = shape.numDimensions
+       var location: [Int] = Array(repeating: 0, count: numDimensions)
+       var index = 0
+       
+       //  Create an array for the updated elements
+       let totalSize = shape.totalSize
+       var newElements: [Float16] = Array(repeating: 0.0, count: totalSize)
+       
+       //  Process each element
+       for element in elements {
+           //  Get the mapped value
+           newElements[index] = block(element, index, location)
+           
+           //  Update the index and the location
+           index += 1
+           if (index >= totalSize) { break }
+           var checkIndex = numDimensions - 1
+           location[checkIndex] += 1
+           while (checkIndex >= 0) {
+               if (location[checkIndex] >= shape.dimensions[checkIndex]) {
+                   location[checkIndex] = 0
+                   checkIndex -= 1
+                   if (checkIndex < 0) { break }
+                   location[checkIndex] += 1
+               }
+               else { break }
+           }
+       }
+       
+       //  Create and return the new tensor
+       return try TensorFloat16(shape: shape, initialValues: newElements)
     }
 }
 
@@ -2056,6 +2210,46 @@ public struct TensorInt32 : Tensor {
             return tensor
         }
     }
+
+    // MARK: - Manipulation functions
+
+    /// Create a new tensor by running each element of this tensor through a passed in closure
+    /// - Parameter block: A closure of type (value: Int32, index: Int, location: \[Int\]) -> Int32, that can transform each element.  The value is the element at the index within the element list for the tensor.  The location is the array of dimension offsets for the element
+    /// - Returns: A tensor of the same shape and type with the modified values
+    public func map(block: (_ value: Int32, _ index: Int, _ location: [Int]) -> Int32) throws -> TensorInt32 {
+       //  Get the location array initialized
+       let numDimensions = shape.numDimensions
+       var location: [Int] = Array(repeating: 0, count: numDimensions)
+       var index = 0
+       
+       //  Create an array for the updated elements
+       let totalSize = shape.totalSize
+       var newElements: [Int32] = Array(repeating: 0, count: totalSize)
+       
+       //  Process each element
+       for element in elements {
+           //  Get the mapped value
+           newElements[index] = block(element, index, location)
+           
+           //  Update the index and the location
+           index += 1
+           if (index >= totalSize) { break }
+           var checkIndex = numDimensions - 1
+           location[checkIndex] += 1
+           while (checkIndex >= 0) {
+               if (location[checkIndex] >= shape.dimensions[checkIndex]) {
+                   location[checkIndex] = 0
+                   checkIndex -= 1
+                   if (checkIndex < 0) { break }
+                   location[checkIndex] += 1
+               }
+               else { break }
+           }
+       }
+       
+       //  Create and return the new tensor
+       return try TensorInt32(shape: shape, initialValues: newElements)
+    }
 }
 
 ///  A Tensor with elements of type UInt8
@@ -2445,6 +2639,46 @@ public struct TensorUInt8 : Tensor {
         
         return data
     }
+
+    // MARK: - Manipulation functions
+
+    /// Create a new tensor by running each element of this tensor through a passed in closure
+    /// - Parameter block: A closure of type (value: UInt8, index: Int, location: \[Int\]) -> UInt8, that can transform each element.  The value is the element at the index within the element list for the tensor.  The location is the array of dimension offsets for the element
+    /// - Returns: A tensor of the same shape and type with the modified values
+    public func map(block: (_ value: UInt8, _ index: Int, _ location: [Int]) -> UInt8) throws -> TensorUInt8 {
+       //  Get the location array initialized
+       let numDimensions = shape.numDimensions
+       var location: [Int] = Array(repeating: 0, count: numDimensions)
+       var index = 0
+       
+       //  Create an array for the updated elements
+       let totalSize = shape.totalSize
+       var newElements: [UInt8] = Array(repeating: 0, count: totalSize)
+       
+       //  Process each element
+       for element in elements {
+           //  Get the mapped value
+           newElements[index] = block(element, index, location)
+           
+           //  Update the index and the location
+           index += 1
+           if (index >= totalSize) { break }
+           var checkIndex = numDimensions - 1
+           location[checkIndex] += 1
+           while (checkIndex >= 0) {
+               if (location[checkIndex] >= shape.dimensions[checkIndex]) {
+                   location[checkIndex] = 0
+                   checkIndex -= 1
+                   if (checkIndex < 0) { break }
+                   location[checkIndex] += 1
+               }
+               else { break }
+           }
+       }
+       
+       //  Create and return the new tensor
+       return try TensorUInt8(shape: shape, initialValues: newElements)
+    }
 }
 
 
@@ -2825,6 +3059,45 @@ public struct TensorBool : Tensor {
         data = Data(bytes: elements, count: elementCount * MemoryLayout<Bool>.size)
         
         return data
+    }
+    // MARK: - Manipulation functions
+    
+    /// Create a new tensor by running each element of this tensor through a passed in closure
+    /// - Parameter block: A closure of type (value: Bool, index: Int, location: \[Int\]) -> Bool, that can transform each element.  The value is the element at the index within the element list for the tensor.  The location is the array of dimension offsets for the element
+    /// - Returns: A tensor of the same shape and type with the modified values
+    public func map(block: (_ value: Bool, _ index: Int, _ location: [Int]) -> Bool) throws -> TensorBool {
+       //  Get the location array initialized
+       let numDimensions = shape.numDimensions
+       var location: [Int] = Array(repeating: 0, count: numDimensions)
+       var index = 0
+       
+       //  Create an array for the updated elements
+       let totalSize = shape.totalSize
+       var newElements: [Bool] = Array(repeating: false, count: totalSize)
+       
+       //  Process each element
+       for element in elements {
+           //  Get the mapped value
+           newElements[index] = block(element, index, location)
+           
+           //  Update the index and the location
+           index += 1
+           if (index >= totalSize) { break }
+           var checkIndex = numDimensions - 1
+           location[checkIndex] += 1
+           while (checkIndex >= 0) {
+               if (location[checkIndex] >= shape.dimensions[checkIndex]) {
+                   location[checkIndex] = 0
+                   checkIndex -= 1
+                   if (checkIndex < 0) { break }
+                   location[checkIndex] += 1
+               }
+               else { break }
+           }
+       }
+       
+       //  Create and return the new tensor
+       return try TensorBool(shape: shape, initialValues: newElements)
     }
 }
 

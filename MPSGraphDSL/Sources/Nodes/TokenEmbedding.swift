@@ -19,8 +19,8 @@ public class TokenEmbedding : UnaryNode {
     
     var tableInitialization: WeightInitialization = .normal(mean: 0.0, standardDeviation: 1.0)
     var lossNode: String? = nil
-    var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
-    var gradientClipping: (min: Double, max: Double)? = nil
+    var tableLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
@@ -90,7 +90,7 @@ public class TokenEmbedding : UnaryNode {
 
             //  If this is a learning layer - add the weights to the list to get assignment operations for
             if let lossNode = lossNode {
-                let learningVariable = LearningVariable(variable: node, tensor: tableTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+                let learningVariable = LearningVariable(variable: node, tensor: tableTensor, loss: lossNode, learningOptions: tableLearningOptions)
                 graph.learningVariables.append(learningVariable)
                 totalParameterCount += tableShape.totalSize
             }
@@ -121,16 +121,28 @@ public class TokenEmbedding : UnaryNode {
     /// Modifier to configure the layer's variables to learn
     /// - Parameters:
     ///   - mode: lossNode: the name of the loss calculation in the Graph
-    ///   - using: (Optional) the optimizer method to use for learning.  Defaults to stochastic gradient descent
-    ///   - gradientClipping: (Optional) defaults to nil.  A tuple with the minimum and maximum gradient values allowed in the back-propogation for this node.  The gradient is clipped to this range before being used by the optimizer
     /// - Returns: The modified layer
-    public func learnWithRespectTo(_ lossNode: String, using: LearningOptimizer = .stochasticGradientDescent, gradientClipping: (min: Double, max: Double)? = nil) -> TokenEmbedding {
+    public func learnWithRespectTo(_ lossNode: String) -> TokenEmbedding {
         self.lossNode = lossNode
-        self.learningOptimizer = using
-        self.gradientClipping = gradientClipping
         return self
     }
     
+    /// Modifier to set the optimizer used for learning the weight variable
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func tableOptimizer(_ optimizer: LearningOptimizer) -> TokenEmbedding {
+        tableLearningOptions = LearningOptions(clipping: tableLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+    
+    /// Modifier to set all the learning options for the weight variable
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func tableLearningOptions(_ options: LearningOptions) -> TokenEmbedding {
+        tableLearningOptions = options
+        return self
+    }
+
     override func getNumberOfParameters() throws -> Int {
         return totalParameterCount
     }

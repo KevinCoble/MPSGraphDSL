@@ -47,6 +47,8 @@ import MetalPerformanceShadersGraph
 // (If number of heads = 1, reshape to remove nh dimension at end)
 //
 // Transposed Attention                                                 [bs, nh, hs]        [B, bs, nh, hs]
+//
+// Concatenated heads (reshape)                                         [bs, nh * hs]       [B, bs, nh * hs]
 
 ///   Node for a self-attention layer
 ///         Token embedding size pulled from last dimension of input
@@ -56,7 +58,8 @@ public class SelfAttention : UnaryNode {
     let headSize: Int
     let numHeads: Int
     let masked: Bool
-    
+    let concatHeads: Bool
+
     var queryWeightInitialization: WeightInitialization = .XavierGlorotNormal
     var keyWeightInitialization: WeightInitialization = .XavierGlorotNormal
     var valueWeightInitialization: WeightInitialization = .XavierGlorotNormal
@@ -69,8 +72,12 @@ public class SelfAttention : UnaryNode {
     var valueBiasInitialValue: Double = 0.0
 
     var lossNode: String? = nil
-    var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
-    var gradientClipping: (min: Double, max: Double)? = nil
+    var queryWeightLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var keyWeightLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var valueWeightLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var queryBiasLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var keyBiasLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var valueBiasLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
@@ -83,11 +90,13 @@ public class SelfAttention : UnaryNode {
     ///   - headSize: The size of the query and key, vectors produced from each token embedding
     ///   - numHeads: (Optional) The number of independent attention heads.  Default is 1.  The head dimension is removed at the end if head count is 1
     ///   - masked: (Optional)  If true the upper-right triangle of the query x keys matrix is masked off, removing the ability of future tokens to affect previous tokens
+    ///   - concatHeads: (Optional)  If true and numHeads > 1, the heads dimension of the result gets concatenated out.  Default is false
     ///   - name: The name for this node and its associated tensor.
-    public init(input: String? = nil, headSize: Int, numHeads: Int = 1, masked: Bool = false, name: String) {
+    public init(input: String? = nil, headSize: Int, numHeads: Int = 1, masked: Bool = false, concatHeads: Bool = false, name: String) {
         self.headSize = headSize
         self.numHeads = numHeads
         self.masked = masked
+        self.concatHeads = concatHeads
         super.init(input: input, name: name)
     }
 
@@ -127,14 +136,14 @@ public class SelfAttention : UnaryNode {
         let dataType = inputTensor.dataType
         
         //  Add the key generation layer
-        let addedKeyItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: inputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: keyWeightInitialization, hasBias: keyHasBias, biasInitialValue: keyBiasInitialValue, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer, name: name!, suffix: "_key")
+        let addedKeyItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: inputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: keyWeightInitialization, hasBias: keyHasBias, biasInitialValue: keyBiasInitialValue, loss: lossNode, weightLearningOptions: keyWeightLearningOptions, biasLearningOptions: keyBiasLearningOptions, name: name!, suffix: "_key")
         addedTensors.append(contentsOf: addedKeyItems.addedTensors)
         suffixes.append(contentsOf: addedKeyItems.addedSuffixes)
         let keyTensor = addedKeyItems.addedTensors.last!
         totalParameterCount += addedKeyItems.addedParameters
 
         //  Add the query generation layer
-        let addedQueryItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: inputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: queryWeightInitialization, hasBias: queryHasBias, biasInitialValue: queryBiasInitialValue, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer, name: name!, suffix: "_query")
+        let addedQueryItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: inputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: queryWeightInitialization, hasBias: queryHasBias, biasInitialValue: queryBiasInitialValue, loss: lossNode, weightLearningOptions: queryWeightLearningOptions, biasLearningOptions: queryBiasLearningOptions, name: name!, suffix: "_query")
         addedTensors.append(contentsOf: addedQueryItems.addedTensors)
         suffixes.append(contentsOf: addedQueryItems.addedSuffixes)
         let queryTensor = addedQueryItems.addedTensors.last!
@@ -157,7 +166,7 @@ public class SelfAttention : UnaryNode {
         }
         
         //  Add the value generation layer
-        let addedValueItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: inputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: valueWeightInitialization, hasBias: valueHasBias, biasInitialValue: valueBiasInitialValue, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer, name: name!, suffix: "_value")
+        let addedValueItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: inputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: valueWeightInitialization, hasBias: valueHasBias, biasInitialValue: valueBiasInitialValue, loss: lossNode, weightLearningOptions: valueWeightLearningOptions, biasLearningOptions: valueBiasLearningOptions, name: name!, suffix: "_value")
         addedTensors.append(contentsOf: addedValueItems.addedTensors)
         suffixes.append(contentsOf: addedValueItems.addedSuffixes)
         let valueTensor = addedValueItems.addedTensors.last!
@@ -230,9 +239,31 @@ public class SelfAttention : UnaryNode {
         
         //  If head count greater than 1, transpose block and head dimension so the head and headSize dimensions can be concatenated later
         else {
-            let transposedAttention = graph.mpsgraph.transposeTensor(attention, dimension: -2, withDimension: -3, name: name!)
+            //  Get the name and suffix for the transpose - it varies depending on the optional concatenation option
+            var transposeName: String
+            var transposeSuffix: String
+            if (concatHeads) {
+                transposeName = name! + "_transposedHeadsAndSizes"
+                transposeSuffix = "_transposedHeadsAndSizes"
+            }
+            else {
+                transposeName = name!
+                transposeSuffix = ""
+            }
+            
+            //  Set up the transpose
+            let transposedAttention = graph.mpsgraph.transposeTensor(attention, dimension: -2, withDimension: -3, name: transposeName)
             addedTensors.append(transposedAttention)
-            suffixes.append("")
+            suffixes.append(transposeSuffix)
+            
+            //  If concatenation requested, add that
+            if (concatHeads) {
+                var newShape: [Int] = [blockSize, numHeads * headSize]
+                if (graph.batchGraph) { newShape.insert(graph.batchSize, at: 0)}
+                let concatenatedHeads = graph.mpsgraph.reshape(transposedAttention, shape: newShape.map{NSNumber(value: $0)}, name: name!)
+                addedTensors.append(concatenatedHeads)
+                suffixes.append("")
+            }
         }
 
         targetIndices.append(addedTensors.count - 1)     //  Last tensor is the normal target
@@ -330,17 +361,149 @@ public class SelfAttention : UnaryNode {
     /// Modifier to configure the layer's variables to learn
     /// - Parameters:
     ///   - lossNode: the name of the loss calculation in the Graph
-    ///   - using: (Optional) the optimizer method to use for learning.  Defaults to stochastic gradient descent
-    ///   - gradientClipping: (Optional) defaults to nil.  A tuple with the minimum and maximum gradient values allowed in the back-propogation for this node.  The gradient is clipped to this range before being used by the optimizer
     /// - Returns: The modified layer
-    public func learnWithRespectTo(_ lossNode: String, using: LearningOptimizer = .stochasticGradientDescent, gradientClipping: (min: Double, max: Double)? = nil) -> SelfAttention {
+    public func learnWithRespectTo(_ lossNode: String) -> SelfAttention {
         self.lossNode = lossNode
-        self.learningOptimizer = using
-        self.gradientClipping = gradientClipping
+        return self
+    }
+    
+    /// Modifier to set the optimizer used for learning the weight variables
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func weightsOptimizer(_ optimizer: LearningOptimizer) -> SelfAttention {
+        keyWeightLearningOptions = LearningOptions(clipping: keyWeightLearningOptions.clipping, optimizer: optimizer)
+        queryWeightLearningOptions = LearningOptions(clipping: queryWeightLearningOptions.clipping, optimizer: optimizer)
+        valueWeightLearningOptions = LearningOptions(clipping: valueWeightLearningOptions.clipping, optimizer: optimizer)
         return self
     }
 
-    internal static func addFullyConnectedBlock(graph: Graph, inputTensor: MPSGraphTensor, tokenSize: Int, blockSize: Int, outputSize: Int, numHeads: Int, dataType: MPSDataType, weightInitialization: WeightInitialization, hasBias: Bool, biasInitialValue: Double, loss: String?, clipping: (min: Double, max: Double)?, optimizer: LearningOptimizer, name: String, suffix: String) throws -> (addedTensors: [MPSGraphTensor], addedSuffixes: [String], addedParameters: Int) {
+    /// Modifier to set all the learning options for the weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func weightLearningOptions(_ options: LearningOptions) -> SelfAttention {
+        keyWeightLearningOptions = options
+        queryWeightLearningOptions = options
+        valueWeightLearningOptions = options
+        return self
+    }
+
+    /// Modifier to set the optimizer used for learning the key weight variable
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func keyWeightOptimizer(_ optimizer: LearningOptimizer) -> SelfAttention {
+        keyWeightLearningOptions = LearningOptions(clipping: keyWeightLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the key weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func keyWeightLearningOptions(_ options: LearningOptions) -> SelfAttention {
+        keyWeightLearningOptions = options
+        return self
+    }
+        
+    /// Modifier to set the optimizer used for learning the query weight variables
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func queryWeightOptimizer(_ optimizer: LearningOptimizer) -> SelfAttention {
+        queryWeightLearningOptions = LearningOptions(clipping: queryWeightLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the query weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func queryWeightLearningOptions(_ options: LearningOptions) -> SelfAttention {
+        queryWeightLearningOptions = options
+        return self
+    }
+    
+    /// Modifier to set the optimizer used for learning the value weight variables
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func valueWeightOptimizer(_ optimizer: LearningOptimizer) -> SelfAttention {
+        valueWeightLearningOptions = LearningOptions(clipping: valueWeightLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the value weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func valueWeightLearningOptions(_ options: LearningOptions) -> SelfAttention {
+        valueWeightLearningOptions = options
+        return self
+    }
+
+    /// Modifier to set the optimizer used for learning the bias variables
+    /// - Parameter optimizer: the optimizer method to use for learning the biases.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func biasOptimizer(_ optimizer: LearningOptimizer) -> SelfAttention {
+        keyBiasLearningOptions = LearningOptions(clipping: keyBiasLearningOptions.clipping, optimizer: optimizer)
+        queryBiasLearningOptions = LearningOptions(clipping: queryBiasLearningOptions.clipping, optimizer: optimizer)
+        valueBiasLearningOptions = LearningOptions(clipping: valueBiasLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the bias variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func biasLearningOptions(_ options: LearningOptions) -> SelfAttention {
+        keyBiasLearningOptions = options
+        queryBiasLearningOptions = options
+        valueBiasLearningOptions = options
+        return self
+    }
+
+    /// Modifier to set the optimizer used for learning the key bias variable
+    /// - Parameter optimizer: the optimizer method to use for learning the biases.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func keyBiasOptimizer(_ optimizer: LearningOptimizer) -> SelfAttention {
+        keyBiasLearningOptions = LearningOptions(clipping: keyBiasLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the key bias variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func keyBiasLearningOptions(_ options: LearningOptions) -> SelfAttention {
+        keyBiasLearningOptions = options
+        return self
+    }
+        
+    /// Modifier to set the optimizer used for learning the query bias variables
+    /// - Parameter optimizer: the optimizer method to use for learning the biases.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func queryBiasOptimizer(_ optimizer: LearningOptimizer) -> SelfAttention {
+        queryBiasLearningOptions = LearningOptions(clipping: queryBiasLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the query bias variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func queryBiasLearningOptions(_ options: LearningOptions) -> SelfAttention {
+        queryBiasLearningOptions = options
+        return self
+    }
+    
+    /// Modifier to set the optimizer used for learning the value bias variables
+    /// - Parameter optimizer: the optimizer method to use for learning the biases.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func valueBiasOptimizer(_ optimizer: LearningOptimizer) -> SelfAttention {
+        valueBiasLearningOptions = LearningOptions(clipping: valueBiasLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the value bias variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func valueBiasLearningOptions(_ options: LearningOptions) -> SelfAttention {
+        valueBiasLearningOptions = options
+        return self
+    }
+
+    internal static func addFullyConnectedBlock(graph: Graph, inputTensor: MPSGraphTensor, tokenSize: Int, blockSize: Int, outputSize: Int, numHeads: Int, dataType: MPSDataType, weightInitialization: WeightInitialization, hasBias: Bool, biasInitialValue: Double, loss: String?, weightLearningOptions: LearningOptions, biasLearningOptions: LearningOptions, name: String, suffix: String) throws -> (addedTensors: [MPSGraphTensor], addedSuffixes: [String], addedParameters: Int) {
         var addedTensors: [MPSGraphTensor] = []
         var addedSuffixes: [String] = []
         var addedParameters = 0
@@ -364,7 +527,7 @@ public class SelfAttention : UnaryNode {
 
         //  If this is a learning layer - add the weights to the list to get assignment operations for
         if let lossNode = loss {
-            let learningVariable = LearningVariable(variable: node, tensor: weightTensor, loss: lossNode, clipping: clipping, optimizer: optimizer)
+            let learningVariable = LearningVariable(variable: node, tensor: weightTensor, loss: lossNode, learningOptions: weightLearningOptions)
             graph.learningVariables.append(learningVariable)
             addedParameters += weightShape.totalSize
         }
@@ -396,7 +559,7 @@ public class SelfAttention : UnaryNode {
 
             //  If this is a learning layer - add the biases to the list to get assignment operations for
             if let loss = loss {
-                let learningVariable = LearningVariable(variable: node, tensor: biasTensor, loss: loss, clipping: clipping, optimizer: optimizer)
+                let learningVariable = LearningVariable(variable: node, tensor: biasTensor, loss: loss, learningOptions: biasLearningOptions)
                 graph.learningVariables.append(learningVariable)
                 addedParameters += biasShape.totalSize
             }
@@ -423,6 +586,7 @@ public class CrossAttention : BinaryNode {
     let headSize: Int
     let numHeads: Int
     let masked: Bool
+    let concatHeads: Bool
     
     var queryWeightInitialization: WeightInitialization = .XavierGlorotNormal
     var keyWeightInitialization: WeightInitialization = .XavierGlorotNormal
@@ -436,8 +600,12 @@ public class CrossAttention : BinaryNode {
     var valueBiasInitialValue: Double = 0.0
 
     var lossNode: String? = nil
-    var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
-    var gradientClipping: (min: Double, max: Double)? = nil
+    var queryWeightLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var keyWeightLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var valueWeightLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var queryBiasLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var keyBiasLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var valueBiasLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
@@ -451,11 +619,13 @@ public class CrossAttention : BinaryNode {
     ///   - headSize: The size of the query and key, vectors produced from each token embedding
     ///   - numHeads: (Optional) The number of independent attention heads.  Default is 1.  The head dimension is removed at the end if head count is 1
     ///   - masked: (Optional)  If true the upper-right triangle of the query x keys matrix is masked off, removing the ability of future tokens to affect previous tokens
+    ///   - concatHeads: (Optional)  If true and numHeads > 1, the heads dimension of the result gets concatenated out.  Default is false
     ///   - name: The name for this node and its associated tensor.
-    public init(input: String? = nil, crossInput: String? = nil, headSize: Int, numHeads: Int = 1, masked: Bool = false, name: String) {
+    public init(input: String? = nil, crossInput: String? = nil, headSize: Int, numHeads: Int = 1, masked: Bool = false, concatHeads: Bool = false, name: String) {
         self.headSize = headSize
         self.numHeads = numHeads
         self.masked = masked
+        self.concatHeads = concatHeads
         super.init(firstInput: input, secondInput: crossInput, name: name)
     }
 
@@ -505,14 +675,14 @@ public class CrossAttention : BinaryNode {
         let dataType = inputTensors.firstInputTensor.dataType
         
         //  Add the key generation layer
-        let addedKeyItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: secondInputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: keyWeightInitialization, hasBias: keyHasBias, biasInitialValue: keyBiasInitialValue, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer, name: name!, suffix: "_key")
+        let addedKeyItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: secondInputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: keyWeightInitialization, hasBias: keyHasBias, biasInitialValue: keyBiasInitialValue, loss: lossNode, weightLearningOptions: keyWeightLearningOptions, biasLearningOptions: keyBiasLearningOptions, name: name!, suffix: "_key")
         addedTensors.append(contentsOf: addedKeyItems.addedTensors)
         suffixes.append(contentsOf: addedKeyItems.addedSuffixes)
         let keyTensor = addedKeyItems.addedTensors.last!
         totalParameterCount += addedKeyItems.addedParameters
 
         //  Add the query generation layer
-        let addedQueryItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: firstInputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: queryWeightInitialization, hasBias: queryHasBias, biasInitialValue: queryBiasInitialValue, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer, name: name!, suffix: "_query")
+        let addedQueryItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: firstInputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: queryWeightInitialization, hasBias: queryHasBias, biasInitialValue: queryBiasInitialValue, loss: lossNode, weightLearningOptions: queryWeightLearningOptions, biasLearningOptions: queryBiasLearningOptions, name: name!, suffix: "_query")
         addedTensors.append(contentsOf: addedQueryItems.addedTensors)
         suffixes.append(contentsOf: addedQueryItems.addedSuffixes)
         let queryTensor = addedQueryItems.addedTensors.last!
@@ -535,7 +705,7 @@ public class CrossAttention : BinaryNode {
         }
         
         //  Add the value generation layer
-        let addedValueItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: secondInputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: valueWeightInitialization, hasBias: valueHasBias, biasInitialValue: valueBiasInitialValue, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer, name: name!, suffix: "_value")
+        let addedValueItems = try SelfAttention.addFullyConnectedBlock(graph: graph, inputTensor: secondInputTensor, tokenSize: tokenSize, blockSize: blockSize, outputSize: headSize, numHeads: numHeads, dataType: dataType, weightInitialization: valueWeightInitialization, hasBias: valueHasBias, biasInitialValue: valueBiasInitialValue, loss: lossNode, weightLearningOptions: valueWeightLearningOptions, biasLearningOptions: valueBiasLearningOptions, name: name!, suffix: "_value")
         addedTensors.append(contentsOf: addedValueItems.addedTensors)
         suffixes.append(contentsOf: addedValueItems.addedSuffixes)
         let valueTensor = addedValueItems.addedTensors.last!
@@ -609,9 +779,31 @@ public class CrossAttention : BinaryNode {
         
         //  If head count greater than 1, transpose block and head dimension so the head and headSize dimensions can be concatenated later
         else {
-            let transposedAttention = graph.mpsgraph.transposeTensor(attention, dimension: -2, withDimension: -3, name: name!)
+            //  Get the name and suffix for the transpose - it varies depending on the optional concatenation option
+            var transposeName: String
+            var transposeSuffix: String
+            if (concatHeads) {
+                transposeName = name! + "_transposedHeadsAndSizes"
+                transposeSuffix = "_transposedHeadsAndSizes"
+            }
+            else {
+                transposeName = name!
+                transposeSuffix = ""
+            }
+            
+            //  Set up the transpose
+            let transposedAttention = graph.mpsgraph.transposeTensor(attention, dimension: -2, withDimension: -3, name: transposeName)
             addedTensors.append(transposedAttention)
-            suffixes.append("")
+            suffixes.append(transposeSuffix)
+            
+            //  If concatenation requested, add that
+            if (concatHeads) {
+                var newShape: [Int] = [blockSize, numHeads * headSize]
+                if (graph.batchGraph) { newShape.insert(graph.batchSize, at: 0)}
+                let concatenatedHeads = graph.mpsgraph.reshape(transposedAttention, shape: newShape.map{NSNumber(value: $0)}, name: name!)
+                addedTensors.append(concatenatedHeads)
+                suffixes.append("")
+            }
         }
 
         targetIndices.append(addedTensors.count - 1)     //  Last tensor is the normal target
@@ -709,16 +901,148 @@ public class CrossAttention : BinaryNode {
     /// Modifier to configure the layer's variables to learn
     /// - Parameters:
     ///   - lossNode: the name of the loss calculation in the Graph
-    ///   - using: (Optional) the optimizer method to use for learning.  Defaults to stochastic gradient descent
-    ///   - gradientClipping: (Optional) defaults to nil.  A tuple with the minimum and maximum gradient values allowed in the back-propogation for this node.  The gradient is clipped to this range before being used by the optimizer
     /// - Returns: The modified layer
-    public func learnWithRespectTo(_ lossNode: String, using: LearningOptimizer = .stochasticGradientDescent, gradientClipping: (min: Double, max: Double)? = nil) -> CrossAttention {
+    public func learnWithRespectTo(_ lossNode: String) -> CrossAttention {
         self.lossNode = lossNode
-        self.learningOptimizer = using
-        self.gradientClipping = gradientClipping
         return self
     }
     
+    /// Modifier to set the optimizer used for learning the weight variables
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func weightsOptimizer(_ optimizer: LearningOptimizer) -> CrossAttention {
+        keyWeightLearningOptions = LearningOptions(clipping: keyWeightLearningOptions.clipping, optimizer: optimizer)
+        queryWeightLearningOptions = LearningOptions(clipping: queryWeightLearningOptions.clipping, optimizer: optimizer)
+        valueWeightLearningOptions = LearningOptions(clipping: valueWeightLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func weightLearningOptions(_ options: LearningOptions) -> CrossAttention {
+        keyWeightLearningOptions = options
+        queryWeightLearningOptions = options
+        valueWeightLearningOptions = options
+        return self
+    }
+
+    /// Modifier to set the optimizer used for learning the key weight variable
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func keyWeightOptimizer(_ optimizer: LearningOptimizer) -> CrossAttention {
+        keyWeightLearningOptions = LearningOptions(clipping: keyWeightLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the key weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func keyWeightLearningOptions(_ options: LearningOptions) -> CrossAttention {
+        keyWeightLearningOptions = options
+        return self
+    }
+        
+    /// Modifier to set the optimizer used for learning the query weight variables
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func queryWeightOptimizer(_ optimizer: LearningOptimizer) -> CrossAttention {
+        queryWeightLearningOptions = LearningOptions(clipping: queryWeightLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the query weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func queryWeightLearningOptions(_ options: LearningOptions) -> CrossAttention {
+        queryWeightLearningOptions = options
+        return self
+    }
+    
+    /// Modifier to set the optimizer used for learning the value weight variables
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func valueWeightOptimizer(_ optimizer: LearningOptimizer) -> CrossAttention {
+        valueWeightLearningOptions = LearningOptions(clipping: valueWeightLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the value weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func valueWeightLearningOptions(_ options: LearningOptions) -> CrossAttention {
+        valueWeightLearningOptions = options
+        return self
+    }
+
+    /// Modifier to set the optimizer used for learning the bias variables
+    /// - Parameter optimizer: the optimizer method to use for learning the biases.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func biasOptimizer(_ optimizer: LearningOptimizer) -> CrossAttention {
+        keyBiasLearningOptions = LearningOptions(clipping: keyBiasLearningOptions.clipping, optimizer: optimizer)
+        queryBiasLearningOptions = LearningOptions(clipping: queryBiasLearningOptions.clipping, optimizer: optimizer)
+        valueBiasLearningOptions = LearningOptions(clipping: valueBiasLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the bias variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func biasLearningOptions(_ options: LearningOptions) -> CrossAttention {
+        keyBiasLearningOptions = options
+        queryBiasLearningOptions = options
+        valueBiasLearningOptions = options
+        return self
+    }
+
+    /// Modifier to set the optimizer used for learning the key bias variable
+    /// - Parameter optimizer: the optimizer method to use for learning the biases.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func keyBiasOptimizer(_ optimizer: LearningOptimizer) -> CrossAttention {
+        keyBiasLearningOptions = LearningOptions(clipping: keyBiasLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the key bias variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func keyBiasLearningOptions(_ options: LearningOptions) -> CrossAttention {
+        keyBiasLearningOptions = options
+        return self
+    }
+        
+    /// Modifier to set the optimizer used for learning the query bias variables
+    /// - Parameter optimizer: the optimizer method to use for learning the biases.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func queryBiasOptimizer(_ optimizer: LearningOptimizer) -> CrossAttention {
+        queryBiasLearningOptions = LearningOptions(clipping: queryBiasLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the query bias variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func queryBiasLearningOptions(_ options: LearningOptions) -> CrossAttention {
+        queryBiasLearningOptions = options
+        return self
+    }
+    
+    /// Modifier to set the optimizer used for learning the value bias variables
+    /// - Parameter optimizer: the optimizer method to use for learning the biases.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func valueBiasOptimizer(_ optimizer: LearningOptimizer) -> CrossAttention {
+        valueBiasLearningOptions = LearningOptions(clipping: valueBiasLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the value bias variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func valueBiasLearningOptions(_ options: LearningOptions) -> CrossAttention {
+        valueBiasLearningOptions = options
+        return self
+    }
+
     override func getNumberOfParameters() throws -> Int {
         return totalParameterCount
     }

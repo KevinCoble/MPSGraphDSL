@@ -212,8 +212,7 @@ public class Variable : Node {
     var dataType: DataType?
     var shape: TensorShape?
     var lossNode: String? = nil
-    var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
-    var gradientClipping: (min: Double, max: Double)? = nil
+    var learningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
     var referenceTensor: Tensor? = nil
     
     var totalParameterCount: Int = 0
@@ -293,13 +292,25 @@ public class Variable : Node {
     /// Modifier to configure the Variable to learn
     /// - Parameters:
     ///   - mode: lossNode: the name of the loss calculation in the Graph
-    ///   - using: (Optional) the optimizer method to use for learning.  Defaults to stochastic gradient descent
-    ///   - gradientClipping: (Optional) defaults to nil.  A tuple with the minimum and maximum gradient values allowed in the back-propogation for this node.  The gradient is clipped to this range before being used by the optimizer
     /// - Returns: The modified Variable
-    public func learnWithRespectTo(_ lossNode: String, using: LearningOptimizer = .stochasticGradientDescent, gradientClipping: (min: Double, max: Double)? = nil) -> Variable {
+    public func learnWithRespectTo(_ lossNode: String) -> Variable {
         self.lossNode = lossNode
-        self.learningOptimizer = using
-        self.gradientClipping = gradientClipping
+        return self
+    }
+    
+    /// Modifier to set the optimizer used for learning the  variable
+    /// - Parameter optimizer: the optimizer method to use for learning the biases.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func optimizer(_ optimizer: LearningOptimizer) -> Variable {
+        learningOptions = LearningOptions(clipping: learningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+    
+    /// Modifier to set all the learning options for the variable
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func learningOptions(_ options: LearningOptions) -> Variable {
+        learningOptions = options
         return self
     }
 
@@ -378,7 +389,7 @@ public class Variable : Node {
 
         //  If this is a learning variable - add to the list to get assignment operations for
         if let lossNode = lossNode {
-            let learningVariable = LearningVariable(variable: self, tensor: variable, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            let learningVariable = LearningVariable(variable: self, tensor: variable, loss: lossNode, learningOptions: learningOptions)
             graph.learningVariables.append(learningVariable)
             totalParameterCount += shape!.totalSize
         }

@@ -449,7 +449,7 @@ extension Float16 : DataElement {
     /// - Returns: a random value in the specified range
     public static func getRandomNumberInRange(range: ParameterRange) -> DataElement {
         let doubleRange = range.min.asDouble...range.max.asDouble
-        return Float(Double.random(in: doubleRange))
+        return Float16(Double.random(in: doubleRange))
     }
 }
 

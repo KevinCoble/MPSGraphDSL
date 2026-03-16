@@ -15,6 +15,8 @@ public class Repeat : Node {
     let numTimes: Int
     let nodes: [Node]
     
+    var totalParameterCount: Int  = 0
+    
     internal init(_ numTimes: Int, nodes: [Node], name: String? = nil) {
         self.numTimes = numTimes
         self.nodes = nodes
@@ -65,6 +67,7 @@ public class Repeat : Node {
         //  Add the nodes multiple times
         let currentNamePrefix = graph.currentNamePrefix
         let previousFirstRepeatBlock = graph.firstRepeatBlock
+        totalParameterCount = 0
         for i in 0..<numTimes {
             //  Set the 'firstRepeatBlock' flag used by RepeatTensorName nodes
             graph.firstRepeatBlock = (i == 0)
@@ -75,6 +78,11 @@ public class Repeat : Node {
             //  Process the nodes
             try graph.processNodes(filteredNodes, block: blockName + "\(i+1)")
             
+            //  Get the parameters added by this instance of the nodes
+            for node in filteredNodes {
+                totalParameterCount += try node.getNumberOfParameters()
+            }
+
             //  Leave the last two prefixes in place
             if (i != 0) { graph.removeSecondFromLastFromPrefixStack() }
         }
@@ -88,6 +96,11 @@ public class Repeat : Node {
     
     override internal func isReferenced() throws {
         //  Don't throw
+    }
+    
+    //  Get the number of parameters put in by the sub-nodes
+    override func getNumberOfParameters() throws -> Int {
+        return totalParameterCount
     }
 }
 

@@ -127,8 +127,9 @@ public class LSTMLayer: UnaryNode {
     var targetLasts: Bool = true
     
     var lossNode: String? = nil
-    var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
-    var gradientClipping: (min: Double, max: Double)? = nil
+    var rWeightLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var iWeightLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var biasLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
 
     var suffixes: [String] = []
     var targetIndices: [Int] = []
@@ -211,7 +212,7 @@ public class LSTMLayer: UnaryNode {
         
         //  If this is a learning layer - add the recurrent weights to the list to get assignment operations for
         if let lossNode = lossNode {
-            let learningVariable = LearningVariable(variable: node, tensor: rweightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            let learningVariable = LearningVariable(variable: node, tensor: rweightTensor, loss: lossNode, learningOptions: rWeightLearningOptions)
             graph.learningVariables.append(learningVariable)
             totalParameterCount += rweightsShape.totalSize
         }
@@ -234,7 +235,7 @@ public class LSTMLayer: UnaryNode {
         
         //  If this is a learning layer - add the input weights to the list to get assignment operations for
         if let lossNode = lossNode {
-            let learningVariable = LearningVariable(variable: node, tensor: iweightTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            let learningVariable = LearningVariable(variable: node, tensor: iweightTensor, loss: lossNode, learningOptions: iWeightLearningOptions)
             graph.learningVariables.append(learningVariable)
             totalParameterCount += iweightsShape.totalSize
         }
@@ -257,7 +258,7 @@ public class LSTMLayer: UnaryNode {
         
         //  If this is a learning layer - add the bias to the list to get assignment operations for
         if let lossNode = lossNode {
-            let learningVariable = LearningVariable(variable: node, tensor: biasTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            let learningVariable = LearningVariable(variable: node, tensor: biasTensor, loss: lossNode, learningOptions: biasLearningOptions)
             graph.learningVariables.append(learningVariable)
             totalParameterCount += biasShape.totalSize
         }
@@ -426,16 +427,78 @@ public class LSTMLayer: UnaryNode {
     /// Modifier to set the LSTM layer to learn with respect to a loss calculation.  The z tensor will be output if this is used
     /// - Parameters:
     ///   - mode: lossNode: the name of the loss calculation in the Graph
-    ///   - using: (Optional) the optimizer method to use for learning.  Defaults to stochastic gradient descent
-    ///   - gradientClipping: (Optional) defaults to nil.  A tuple with the minimum and maximum gradient values allowed in the back-propogation for this node.  The gradient is clipped to this range before being used by the optimizer
     /// - Returns: The modified layer
-    public func learnWithRespectTo(_ lossNode: String, using: LearningOptimizer = .stochasticGradientDescent, gradientClipping: (min: Double, max: Double)? = nil) -> LSTMLayer {
+    public func learnWithRespectTo(_ lossNode: String) -> LSTMLayer {
         self.lossNode = lossNode
-        self.learningOptimizer = using
-        self.gradientClipping = gradientClipping
         return self
     }
     
+    /// Modifier to set the optimizer used for learning the weight variables
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func weightsOptimizer(_ optimizer: LearningOptimizer) -> LSTMLayer {
+        rWeightLearningOptions = LearningOptions(clipping: rWeightLearningOptions.clipping, optimizer: optimizer)
+        iWeightLearningOptions = LearningOptions(clipping: iWeightLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func weightLearningOptions(_ options: LearningOptions) -> LSTMLayer {
+        rWeightLearningOptions = options
+        iWeightLearningOptions = options
+        return self
+    }
+
+    /// Modifier to set the optimizer used for learning the recurrent weight variable
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func rWeightOptimizer(_ optimizer: LearningOptimizer) -> LSTMLayer {
+        rWeightLearningOptions = LearningOptions(clipping: rWeightLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the recurrent weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func rWeightLearningOptions(_ options: LearningOptions) -> LSTMLayer {
+        rWeightLearningOptions = options
+        return self
+    }
+        
+    /// Modifier to set the optimizer used for learning the input weight variables
+    /// - Parameter optimizer: the optimizer method to use for learning the weights.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func iWeightOptimizer(_ optimizer: LearningOptimizer) -> LSTMLayer {
+        iWeightLearningOptions = LearningOptions(clipping: iWeightLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the input weight variables
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func iWeightLearningOptions(_ options: LearningOptions) -> LSTMLayer {
+        iWeightLearningOptions = options
+        return self
+    }
+
+    /// Modifier to set the optimizer used for learning the bias variable
+    /// - Parameter optimizer: the optimizer method to use for learning the biases.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func biasOptimizer(_ optimizer: LearningOptimizer) -> LSTMLayer {
+        biasLearningOptions = LearningOptions(clipping: biasLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+
+    /// Modifier to set all the learning options for the bias variable
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func biasLearningOptions(_ options: LearningOptions) -> LSTMLayer {
+        biasLearningOptions = options
+        return self
+    }
+
     override func getNumberOfParameters() throws -> Int {
         return totalParameterCount
     }

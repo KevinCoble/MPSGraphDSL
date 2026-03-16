@@ -20,9 +20,9 @@ public class LayerNormalization : UnaryNode {
     let activationFunction: ActivationFunction
     
     var lossNode: String? = nil
-    var learningOptimizer: LearningOptimizer = .stochasticGradientDescent
-    var gradientClipping: (min: Double, max: Double)? = nil
-    
+    var gammaLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+    var betaLearningOptions: LearningOptions = LearningOptions(clipping: nil, optimizer: .stochasticGradientDescent)
+
     var suffixes: [String] = []
     var targetIndices: [Int] = []
     
@@ -100,7 +100,7 @@ public class LayerNormalization : UnaryNode {
 
         //  If this is a learning layer - add the weights to the list to get assignment operations for
         if let lossNode = lossNode {
-            let learningVariable = LearningVariable(variable: node, tensor: gammaTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            let learningVariable = LearningVariable(variable: node, tensor: gammaTensor, loss: lossNode, learningOptions: gammaLearningOptions)
             graph.learningVariables.append(learningVariable)
             totalParameterCount += shape.totalSize
         }
@@ -122,7 +122,7 @@ public class LayerNormalization : UnaryNode {
 
         //  If this is a learning layer - add the weights to the list to get assignment operations for
         if let lossNode = lossNode {
-            let learningVariable = LearningVariable(variable: node, tensor: betaTensor, loss: lossNode, clipping: gradientClipping, optimizer: learningOptimizer)
+            let learningVariable = LearningVariable(variable: node, tensor: betaTensor, loss: lossNode, learningOptions: betaLearningOptions)
             graph.learningVariables.append(learningVariable)
             totalParameterCount += shape.totalSize
         }
@@ -201,16 +201,44 @@ public class LayerNormalization : UnaryNode {
     /// Modifier to configure the layer's variables to learn
     /// - Parameters:
     ///   - mode: lossNode: the name of the loss calculation in the Graph
-    ///   - using: (Optional) the optimizer method to use for learning.  Defaults to stochastic gradient descent
-    ///   - gradientClipping: (Optional) defaults to nil.  A tuple with the minimum and maximum gradient values allowed in the back-propogation for this node.  The gradient is clipped to this range before being used by the optimizer
     /// - Returns: The modified layer
-    public func learnWithRespectTo(_ lossNode: String, using: LearningOptimizer = .stochasticGradientDescent, gradientClipping: (min: Double, max: Double)? = nil) -> LayerNormalization {
+    public func learnWithRespectTo(_ lossNode: String) -> LayerNormalization {
         self.lossNode = lossNode
-        self.learningOptimizer = using
-        self.gradientClipping = gradientClipping
         return self
     }
     
+    /// Modifier to set the optimizer used for learning the gamma variable
+    /// - Parameter optimizer: the optimizer method to use for learning the gammas.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func gammaOptimizer(_ optimizer: LearningOptimizer) -> LayerNormalization {
+        gammaLearningOptions = LearningOptions(clipping: gammaLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+    
+    /// Modifier to set all the learning options for the gamma variable
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func gammaLearningOptions(_ options: LearningOptions) -> LayerNormalization {
+        gammaLearningOptions = options
+        return self
+    }
+    
+    /// Modifier to set the optimizer used for learning the beta variable
+    /// - Parameter optimizer: the optimizer method to use for learning the beta.  Defaults to stochastic gradient descent
+    /// - Returns: The modified layer
+    public func betaOptimizer(_ optimizer: LearningOptimizer) -> LayerNormalization {
+        betaLearningOptions = LearningOptions(clipping: betaLearningOptions.clipping, optimizer: optimizer)
+        return self
+    }
+    
+    /// Modifier to set all the learning options for the beta variable
+    /// - Parameter options: The LearningOptions structure with all the learning options
+    /// - Returns: The modified layer
+    public func betaLearningOptions(_ options: LearningOptions) -> LayerNormalization {
+        betaLearningOptions = options
+        return self
+    }
+
     override func getNumberOfParameters() throws -> Int {
         return totalParameterCount
     }

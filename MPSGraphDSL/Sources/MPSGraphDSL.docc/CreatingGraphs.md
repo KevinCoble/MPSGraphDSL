@@ -214,7 +214,7 @@ This defines our Variable.  It gets it's shape and data type from the initializa
 
 **.learnWithRespectTo("loss")**
 
-This modifies the Variable to be updated when in a learning mode.  The update will be a function of the gradient from a future node named "loss", and the learning rate provided by a ``Learning`` node.  To keep things simple for this example the default optimizer, the standard stochastic gradient descent, is used.  The 'learnWithRespectTo' modifier has another optional paramater that can be used to change the default optimizer to several forms of the 'Adam' optimizer.  Additional nodes are added by the graph for momentum and velocity tensors, so more memory will be required by the GPU with these optimizers.
+This modifies the Variable to be updated when in a learning mode.  The update will be a function of the gradient from a future node named "loss", and the learning rate provided by a ``Learning`` node.  To keep things simple for this example the default optimizer, the standard stochastic gradient descent, is used.  The 'learnWithRespectTo' modifier has another optional paramater that can be used to change the default optimizer to several forms of the 'Adam' optimizer or the MUON optimizer.  Additional nodes are added by the graph for momentum and velocity tensors, so more memory will be required by the GPU with these optimizers.
 
 **.targetForModes(["getVar"])**
 
@@ -252,13 +252,15 @@ Discussion of how to use this graph is in a later section.
 
 ###  Optimizers
 
-The 'learnWithRespectTo' modifier for layers sets the learning modes for the learnable layer and the loss function it should learn against, but it also allows you to optionally set the optimization strategy for the layer.  It defaults to a standard stochastic gradient descent, but can be set to an 'adam' optimizer, with or without a maximum velocity value.
+The 'learnWithRespectTo' modifier for layers sets the learning modes for the learnable layer and the loss function it should learn against, but it also allows you to optionally set the optimization strategy for the layer.  It defaults to a standard stochastic gradient descent, but can be set to an 'adam' optimizer, with or without a maximum velocity value, or the MUON optimizer.
 
 The stochastic gradient descent updates the learnable parameters based on a fraction (the learning rate) of the current gradient of the parameter relative to the loss the function specified.  Only the learning rate parameter will be used for this option.
 
 The Adam optimizer also updates the learnable parameters based on a fraction of the current gradient of the parameter relative to the loss the function, but calculates running velocity and momentum terms for the changes, and uses these to avoid wide swings in updates.  This requires additional memory for the velocity and momentum terms.  Adam optimizers use the learning rate and β1, β2, and ϵ constants (see other documentation on adam optimizers for what these parameters do).
 
 The Adam optimizer with maximum velocity is similar to the vanilla Adam optimizer, but also calculates a maximum velocity term (additional memory), and uses that to keep any large velocity changes in check.
+
+The MUON optimizer should only be used for two-dimensional weight matrices.  It uses a momentum calculation to smooth the gradients, and then performs an iterative Newton-Schultz algorithm to get the gradients close to an orthonormal matrix before applying the learning rate and updating the variable.
 
 ###  Constant and Settable Learning Parameters
 

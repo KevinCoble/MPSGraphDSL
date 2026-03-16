@@ -22,6 +22,8 @@ public class Learning : Node {
     let β2: Double
     let ϵConstant: Bool
     let ϵ: Double
+    let μConstant: Bool
+    let μ: Double
 
 
     /// Construct a Learning node with the specified parameters
@@ -40,6 +42,8 @@ public class Learning : Node {
         self.β2 = 0.999
         self.ϵConstant = true
         self.ϵ = 1.0e-7
+        self.μConstant = true
+        self.μ = 0.95
         super.init(name: name)
     }
 
@@ -49,7 +53,7 @@ public class Learning : Node {
     ///   - learningRate: (Optional) The learning rate value a constant learning rate, or the initial value for a variable learning rate
     ///   - learningModes: The run modes that should include a learning clause at the end of the graph
     ///   - name: (Optional) The name for this node and its associated tensor.  If not a constant learning rate, the name is required
-    public init(learningRateConstant: Bool = true, learningRate: Double = 0.05, β1Constant: Bool = true, β1: Double = 0.9, β2Constant: Bool = true, β2: Double = 0.999, ϵConstant: Bool = true, ϵ: Double = 1.0e-7, learningModes: [String], name: String? = nil) {
+    public init(learningRateConstant: Bool = true, learningRate: Double = 0.05, β1Constant: Bool = true, β1: Double = 0.9, β2Constant: Bool = true, β2: Double = 0.999, ϵConstant: Bool = true, ϵ: Double = 1.0e-7, μ: Double = 0.95, learningModes: [String], name: String? = nil) {
         self.constant = learningRateConstant
         self.learningRate = learningRate
         self.learningModes = learningModes
@@ -59,6 +63,8 @@ public class Learning : Node {
         self.β2 = 0.999
         self.ϵConstant = true
         self.ϵ = 1.0e-7
+        self.μConstant = true
+        self.μ = μ
         super.init(name: name)
     }
 
@@ -81,6 +87,8 @@ public class Learning : Node {
         graph.β2 = β2
         graph.ϵConstant = ϵConstant
         graph.ϵ = ϵ
+        graph.μConstant = μConstant
+        graph.μ = μ
 
         //  Create the learning rate tensor as our node output
         if constant {
@@ -120,13 +128,26 @@ public class MeanSquaredErrorLoss: BinaryNode {
         //  Get the input tensors
         let inputTensors = try graph.getBinaryTensors(firstInputName, secondInputName)
         
+        //  Get the name
+        var nodeName = graph.getFullName(name)
+        if (nodeName == nil) { nodeName = "*meanSquaredErrorLossNode*"}
+        
         //  Add to the graph itself
-        let subtraction = graph.mpsgraph.subtraction(inputTensors.firstInputTensor, inputTensors.secondInputTensor, name: nil)
-        let squareResult = graph.mpsgraph.square(with: subtraction, name: nil)
-        let mean = graph.mpsgraph.mean(of: squareResult, axes: [0 as NSNumber], name: graph.getFullName(name))
+        let subtraction = graph.mpsgraph.subtraction(inputTensors.firstInputTensor, inputTensors.secondInputTensor, name: nodeName! + "_subtraction")
+        let squareResult = graph.mpsgraph.square(with: subtraction, name: nodeName! + "_squared")
+        let mean = graph.mpsgraph.mean(of: squareResult, axes: [0 as NSNumber], name: nodeName!)
 
         //  Return the created MPSGraphTensor
-        return [mean]
+        return [subtraction, squareResult, mean]
+    }
+    
+    override internal func getNodeSuffixes() -> [String] {
+        return ["_subtraction", "_squared", "", ""]
+    }
+    
+    //  Get the indices for added tensors of target nodes that should be added to the target tensor list - if nil returned all tensors get targetted
+    override internal func getTargetIndices() -> [Int]? {
+        return [2]     //  mean is the target
     }
 }
 
@@ -149,12 +170,25 @@ public class MeanAbsoluteErrorLoss: BinaryNode {
         //  Get the input tensors
         let inputTensors = try graph.getBinaryTensors(firstInputName, secondInputName)
         
+        //  Get the name
+        var nodeName = graph.getFullName(name)
+        if (nodeName == nil) { nodeName = "*meanAbsoluteErrorLossNode*"}
+
         //  Add to the graph itself
-        let subtraction = graph.mpsgraph.subtraction(inputTensors.firstInputTensor, inputTensors.secondInputTensor, name: nil)
-        let absoluteResult = graph.mpsgraph.absolute(with: subtraction, name: nil)
-        let mean = graph.mpsgraph.mean(of: absoluteResult, axes: [0 as NSNumber], name: graph.getFullName(name))
+        let subtraction = graph.mpsgraph.subtraction(inputTensors.firstInputTensor, inputTensors.secondInputTensor, name: nodeName! + "_subtraction")
+        let absoluteResult = graph.mpsgraph.absolute(with: subtraction, name: nodeName! + "_absolute")
+        let mean = graph.mpsgraph.mean(of: absoluteResult, axes: [0 as NSNumber], name: nodeName!)
 
         //  Return the created MPSGraphTensor
-        return [mean]
+        return [subtraction, absoluteResult, mean]
+    }
+    
+    override internal func getNodeSuffixes() -> [String] {
+        return ["_subtraction", "_absolute", "", ""]
+    }
+    
+    //  Get the indices for added tensors of target nodes that should be added to the target tensor list - if nil returned all tensors get targetted
+    override internal func getTargetIndices() -> [Int]? {
+        return [2]     //  mean is the target
     }
 }

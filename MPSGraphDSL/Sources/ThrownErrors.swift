@@ -146,6 +146,8 @@ public enum MPSGraphDSLErrors : Error {
     case RepeatTensorNameReferenceNameDuplicated
     ///  A RepeatTensorName had an initial name that was not found in the previous noded
     case RepeatTensorNameInitialNameNotFound
+    ///  A MUON optimizer was used on a variable that was not a two dimensional matrix
+    case MUONOptimizerRequires2DVariable
 }
 
 ///  Errors that can be thrown by the MPSGraph building system when dealing with neural network layers

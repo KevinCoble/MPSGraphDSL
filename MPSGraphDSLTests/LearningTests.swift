@@ -659,6 +659,70 @@ struct LearningTests {
         #expect(totalError < 0.001)
     }
 
+    @Test func AdamTest() async throws {
+        let inputTensor = try TensorFloat32(shape: TensorShape([4]), initialValues: [1.0, 2.0, 3.0, 4.0])
+        let outputTensor = try TensorFloat32(shape: TensorShape([4]), initialValues: [5.0, 1.0, 4.0, 4.0])
+
+        //  Build the graph
+        let graph = Graph {
+            PlaceHolder(shape: [4], type: .float32, name: "inputs")
+            PlaceHolder(shape: [4], type: .float32, modes: ["learn"], name: "expectedValue")
+            Linear(input: "inputs", outputFeatures: 4, addBias: false, name: "result")
+                .learnWithRespectTo("loss")
+                .weightOptimizer(.adamOptimizer)
+                .targetForModes(["infer"])
+            MeanSquaredErrorLoss(actual: "expectedValue", predicted: "result", name: "loss")
+                .targetForModes(["lossCalc", "learn"])
+            Learning(learningRateConstant: true, learningRate: 0.02, μ: 0.95, learningModes: ["learn"])
+        }
+        try graph.printShapeList()
+        
+        //  Train
+        for _ in 0..<250 {
+            _ = try graph.runOne(mode: "learn", inputTensors: ["inputs": inputTensor, "expectedValue": outputTensor])
+        }
+        
+        //  Get the post-training output.  Should match output
+        let results = try graph.runOne(mode: "infer", inputTensors: ["inputs": inputTensor])
+        let result = results["result"]!
+        #expect(try abs(result.getElement(index: 0).asDouble - 5.0) < 1.0E-02)
+        #expect(try abs(result.getElement(index: 1).asDouble - 1.0) < 1.0E-02)
+        #expect(try abs(result.getElement(index: 2).asDouble - 4.0) < 1.0E-02)
+        #expect(try abs(result.getElement(index: 3).asDouble - 4.0) < 1.0E-02)
+    }
+
+    @Test func MUONTest() async throws {
+        let inputTensor = try TensorFloat32(shape: TensorShape([4]), initialValues: [1.0, 2.0, 3.0, 4.0])
+        let outputTensor = try TensorFloat32(shape: TensorShape([4]), initialValues: [5.0, 1.0, 4.0, 4.0])
+
+        //  Build the graph
+        let graph = Graph {
+            PlaceHolder(shape: [4], type: .float32, name: "inputs")
+            PlaceHolder(shape: [4], type: .float32, modes: ["learn"], name: "expectedValue")
+            Linear(input: "inputs", outputFeatures: 4, addBias: false, name: "result")
+                .learnWithRespectTo("loss")
+                .weightOptimizer(.MUONOptimizer)
+                .targetForModes(["infer"])
+            MeanSquaredErrorLoss(actual: "expectedValue", predicted: "result", name: "loss")
+                .targetForModes(["lossCalc", "learn"])
+            Learning(learningRateConstant: true, learningRate: 0.02, μ: 0.95, learningModes: ["learn"])
+        }
+        try graph.printShapeList()
+        
+        //  Train
+        for _ in 0..<1250 {
+            _ = try graph.runOne(mode: "learn", inputTensors: ["inputs": inputTensor, "expectedValue": outputTensor])
+        }
+        
+        //  Get the post-training output.  Should match output
+        let results = try graph.runOne(mode: "infer", inputTensors: ["inputs": inputTensor])
+        let result = results["result"]!
+        #expect(try abs(result.getElement(index: 0).asDouble - 5.0) < 2.0E-01)
+        #expect(try abs(result.getElement(index: 1).asDouble - 1.0) < 2.0E-01)
+        #expect(try abs(result.getElement(index: 2).asDouble - 4.0) < 2.0E-01)
+        #expect(try abs(result.getElement(index: 3).asDouble - 4.0) < 2.0E-01)
+    }
+
     @Test func SpeedTest() async throws {
         //  Get a test data set
         let testDataSet = DataSet(inputShape: TensorShape([1, 2]), inputType: .float32, outputShape: TensorShape([3]), outputType: .float32)

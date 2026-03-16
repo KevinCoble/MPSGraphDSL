@@ -9,6 +9,7 @@ The following composite nodes are available:
 | ------------------------ | ----------- |
 | ``MeanSquaredErrorLoss`` | The loss function using a mean-squared error calculation                                                     |
 | ``MeanAbsoluteErrorLoss``| The loss function using a mean-absolute-difference error calculation                                         |
+| ``Linear``               | A standard affine linear transform of the last dimension with optional bias and activation function          |
 | ``FullyConnectedLayer``  | A standard fully-connected layer with optional bias term and activation function                             |
 | ``RNNLayer``             | A standard one-gate recursivve neural newtwork layer.  Weights, biases and activation functions are managed  |
 | ``LSTMLayer``            | The long short term memory layer, with all four gates.  Weights, biases and activation functions are managed |
@@ -53,6 +54,60 @@ The following activation functions are supported:
 |  Leaky ReLU from Tensor             |  .leakyRelu(tensor)    | LeakyReLU |
 |  Gaussian Error Linear Unit (GELU)  |  .grelu     | GELU |
 |  Exponential Linear Unit (ELU)      |  .elu(alpha)     | ELU |
+
+
+### Linear
+
+The linear layer is a standard neural network layer that takes the input tensor, multiplies it by the weight tensor, optionally adds a bias term to that result, then performs an activation function on the final output.  The weight tensor is sized to convert the last dimension of the input to a specified size.
+
+The weights for the layer can be initialized in a number of different ways, using uniform random values with a given range, gaussian normal values with given mean a standard deviation, or Xavier/Glorot or He parameters can be used with either of these methods.  The default method is based on the activation function being used.  If a ReLU or related activation function the initialization is done with a normal distribution using the He method parameters.  Any other activation function changes the default initialization method to a normal distribution using the Xavier/Glorot method parameters.  The initialization method and parameters used can set using a modifier on the layer.
+
+Bias initial values, if a bias is to be used, can be initialized to a given value.  The value defaults to zero, but can be set using a modifier.
+
+####  Creating a Linear Layer
+
+The following initializer is used in a Graph (or SubGraph) definition to add a Linear Layer:
+
+```swift
+Linear(input: String? = nil, outputFeatures: Int, addBias: Bool = true, activationFunction: ActivationFunction = .none, name: String)
+```
+
+The outputFeatures value determines the number of 'neurons' in the layer.  The result from the node will be the same as the input shape, with the last dimension replaced with this value.
+
+The activation function is selected from the enumeration ``ActivationFunction``.  To turn off activation, select the option '.none'.
+
+The input tensor and node name are standard parameters.  See the article on Creating Graphs for more information.
+
+####  Modifiers for a Linear Layer
+
+The following modifiers are available for the Linear node:
+
+| Modifier            | Description |
+| ----------------------------------| ----------- |
+|  weightInitialization(initializerInfo:)   |  Sets the method and parameters for random initialization of the weights Variable       |
+|  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
+|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+
+As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the FullyConnectedLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
+
+
+####  Tensors Added by a Linear node
+
+The following tensors are added to the Graph by the node:
+
+| Suffix                | Targetted | Description |
+| --------------------- | --------- | ---------------------- |
+| "_weights"            |     No     | The weights Variable.  Added to assign/load and learn operations if configured        |
+| "_biases"             |     No     | (If configured) The biases Variable.  Added to assign/load and learn operations if configured        |
+| "_inputReshape"       |     No     | (If one-dimensional input) The input reshaped to have a row dimension of 1        |
+| "_matrixMult"         | See Desc.  | The multiplication of the input by the weights.  Set as a target if no bias, activation, or reshape tensors needed        |
+| "_outputReshape"      | See Desc.     | (If one-dimensional input) The output reshaped to remove row dimension.  Set as a target if no bias or activation tensor needed        |
+| "_biasAdded"          | See Desc.  | (If configured) The addition of the bias term.  Set as a target if no activation tensor needed        |
+| None.                 |    Yes     | (If configured) The activation function.  Set as a target if node configured as target       |
+
+Note:  Any of the above tensors that can become the target will have their suffix removed (named with just the layer's node name) when they are the target tensor.  This makes the name of the output of the node the same regardless of configuration.
+
+These tensors can be referenced using the name of the node with the suffix added.
 
 
 ### FullyConnectedLayer
@@ -719,8 +774,10 @@ The following tensors are added to the Graph by the node:
 | "_scaledQxKT"           |     No     | The QxKT tensor scaled by 1/sqrt(head size)    |
 | "_maskedScaledQxKT"     |     No     | If a mask is specified. The scaled QxKT tensor with the added mask    |
 | "_softmax"              |     No     | The SoftMax operation applied to the scaled (and possibly masked) QxKT tensor     |
-| "_scaledAttention" or "" | If numHeads > 1 | The result of the SoftMax operation mulitiplied by the Value projection matrix     |
+| "_scaledAttention"     |      No     | The result of the SoftMax operation mulitiplied by the Value projection matrix     |
 | ""                     |     Yes    | If numHeads == 1.  The output reshaped to remove the 'head' dimension added at the beginning    |
+| "_transposedHeadsAndSizes" or "" |      No     | If numHeads > 1.  The head and feature dimension transposed to make the shape (batch x) blockSize x numHeads x headSize     |
+| ""                     |     Yes    | If numHeads > 1 and concatHeads == true.  The output reshaped to remove the 'head' dimension added at the beginning    |
 
 These tensors can be referenced using the name of the node with the suffix added.
 
