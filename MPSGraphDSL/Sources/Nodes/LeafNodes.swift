@@ -427,10 +427,10 @@ public class Variable : Node {
     internal func getResetData(forGraph: Graph) throws -> MPSGraphTensorData? {
         switch (valueSource) {
         case .tensor(let sourceTensor):
-            return try sourceTensor.getMPSGraphTensorData(forGraph: forGraph)
+            return try sourceTensor.getMPSGraphTensorData(forDevice: forGraph.device)
         case .tensorReference:
             if let referenceTensor = referenceTensor {
-                return try referenceTensor.getMPSGraphTensorData(forGraph: forGraph)
+                return try referenceTensor.getMPSGraphTensorData(forDevice: forGraph.device)
             }
             else {
                 return nil
@@ -442,11 +442,11 @@ public class Variable : Node {
                 let squareShape = TensorShape([shape!.dimensions[1], shape!.dimensions[1]])
                 let initializationInfo = WeightInitialization.uniform(min: range.min.asDouble, max: range.max.asDouble)
                 let tensor = try CreateTensor.createOrthogonalWeightInitializationTensor(type: dataType!, shape: squareShape, initializationInfo: initializationInfo, numGates: numGates)
-                return try tensor.getMPSGraphTensorData(forGraph: forGraph)
+                return try tensor.getMPSGraphTensorData(forDevice: forGraph.device)
             }
             else {
                 let tensor = CreateTensor.randomUniformValues(type: dataType!, shape: shape!, range: range)
-                return try tensor.getMPSGraphTensorData(forGraph: forGraph)
+                return try tensor.getMPSGraphTensorData(forDevice: forGraph.device)
             }
         case .randomNormalValues(let mean, let standardDeviation, let orthogonal):
             if (orthogonal) {
@@ -455,15 +455,15 @@ public class Variable : Node {
                 let squareShape = TensorShape([shape!.dimensions[1], shape!.dimensions[1]])
                 let initializationInfo = WeightInitialization.normal(mean: mean, standardDeviation: standardDeviation)
                 let tensor = try CreateTensor.createOrthogonalWeightInitializationTensor(type: dataType!, shape: squareShape, initializationInfo: initializationInfo, numGates: numGates)
-                return try tensor.getMPSGraphTensorData(forGraph: forGraph)
+                return try tensor.getMPSGraphTensorData(forDevice: forGraph.device)
             }
             else {
                 let tensor = CreateTensor.randomNormalValues(type: dataType!, shape: shape!, mean: mean, standardDeviation: standardDeviation)
-                return try tensor.getMPSGraphTensorData(forGraph: forGraph)
+                return try tensor.getMPSGraphTensorData(forDevice: forGraph.device)
             }
         case .constant(let value):
             let tensor = CreateTensor.constantValues(type: dataType!, shape: shape!, initialValue: value)
-            return try tensor.getMPSGraphTensorData(forGraph: forGraph)
+            return try tensor.getMPSGraphTensorData(forDevice: forGraph.device)
         case .inputTensor:
             return nil
         }

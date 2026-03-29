@@ -210,6 +210,12 @@ public enum MPSGraphRunErrors : Error {
     case LossNodeNotFound(String)
     ///  The specified loss node was not fa target for the run mode
     case LossNodeNotATargetForMode(String)
+    ///  A commit operation was performed with no encoded operations on the command buffer
+    case NoEncodedOperations
+    ///  An encodeForExecutable operation was attempted to a mode that does not yet have an executable compiled
+    case NoCompiledExecutableForMode
+    ///  A target tensor was not found in the added tensor list.  Most likely an internal error or result of other error
+    case TargetTensorNotFoundInGraph
 }
 
 ///  Errors that can be thrown by the persistance subsystem

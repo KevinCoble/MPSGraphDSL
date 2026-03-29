@@ -267,5 +267,52 @@ struct MPSGraphDSLTests {
         #expect(value2 == 11.0)
 
     }
+    
+    @Test func compilteTest() async throws {
+        let graph = Graph {
+            PlaceHolder(shape: [2], type: .float32, name: "input")
+            Square(name: "setTarget")
+                .targetForModes(["runTest"])
+            SquareRoot()
+            Negative(name: "defaultTarget")
+                .targetForModes(["runTest"])
+        }
+        
+        try graph.compileForMode("runTest")
+        
+        let inputTensor = try TensorFloat32(shape: TensorShape([2]), initialValues: [1.0, 2.0])
+        let results = try graph.encodeForExecutable(mode: "runTest", inputTensors: ["input" : inputTensor])
+        
+        #expect(results.count == 2)
+        try #require(results["setTarget"] != nil)
+        try #require(results["defaultTarget"] != nil)
+        let result1 = results["setTarget"]!
+        #expect(try result1.getElement(index: 0) == 1.0)
+        #expect(try result1.getElement(index: 1) == 4.0)
+        let result2 = results["defaultTarget"]!
+        #expect(try result2.getElement(index: 0) == -1.0)
+        #expect(try result2.getElement(index: 1) == -2.0)
+        
+        var delayedResults: [Double] = [0.0, 0.0, 0.0, 0.0]
+        let completionHandler: Graph.MPSGraphDSLEncodeCompletionHandler = { (results: [String: Tensor]) -> Void in
+            do {
+                let result = results["setTarget"]!
+                delayedResults[0] = try result.getElement(index: 0)
+                delayedResults[1] = try result.getElement(index: 1)
+                let result2 = results["defaultTarget"]!
+                delayedResults[2] = try result2.getElement(index: 0)
+                delayedResults[3] = try result2.getElement(index: 1)
+            } catch {
+                fatalError("error getting element from result tensor")
+            }
+        }
+        try graph.encodeWithoutCommitForExecutable(mode: "runTest", inputTensors: ["input" : inputTensor], completionHandler: completionHandler)
+        try graph.commitBuffer(waitForResults: true)
+        
+        #expect(delayedResults[0] == 1.0)
+        #expect(delayedResults[1] == 4.0)
+        #expect(delayedResults[2] == -1.0)
+        #expect(delayedResults[3] == -2.0)
+    }
 }
 

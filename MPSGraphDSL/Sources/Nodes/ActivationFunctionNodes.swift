@@ -149,6 +149,49 @@ public class GELU : UnaryNode {
     }
 }
 
+///   Node to perform the GELU activation function on the input tensor using the tanh approximation
+public class GELU_tanh_approx : UnaryNode {
+    ///  Constructor for a GELU approximation operation
+    ///
+    /// - Parameters:
+    ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
+    ///   - name: (Optional) The name for this node and its associated tensor
+    override public init(input: String? = nil, name: String? = nil) {
+        super.init(input: input, name: name)
+    }
+
+    override internal func addToGraph(graph: Graph) throws -> [MPSGraphTensor?] {
+        //  Get the input tensor
+        let inputTensor = try graph.getUnaryTensor(name: inputName)
+        
+        let GELUResult = GELU_tanh_approx.addGELU_tanh_approx(graph: graph, inputTensor: inputTensor)
+        
+        //  Remember the output tensor and shape for later
+        return [GELUResult]
+    }
+    
+    internal static func addGELU_tanh_approx(graph: Graph, inputTensor: MPSGraphTensor) -> MPSGraphTensor {
+        let inputType = inputTensor.dataType
+        
+        //  Add to the graph itself
+        let squared = graph.mpsgraph.square(with: inputTensor, name: nil)
+        let cubed = graph.mpsgraph.multiplication(squared, inputTensor, name: nil)
+        let const1Tensor = graph.mpsgraph.constant(0.044715, shape: [1 as NSNumber], dataType: inputType)
+        let scaledCubed = graph.mpsgraph.multiplication(const1Tensor, cubed, name: nil)
+        let scaledCubedPlusX = graph.mpsgraph.addition(scaledCubed, inputTensor, name: nil)
+        let const2Tensor = graph.mpsgraph.constant(sqrt(2.0 / Double.pi), shape: [1 as NSNumber], dataType: inputType)
+        let tanhInput = graph.mpsgraph.multiplication(const2Tensor, scaledCubedPlusX, name: nil)
+        let tanhResult = graph.mpsgraph.tanh(with: tanhInput, name: nil)
+        let oneTensor = graph.getOneTensor(type: DataType(from: inputType))
+        let tanhPlus1 = graph.mpsgraph.addition(oneTensor, tanhResult, name: nil)
+        let timesX = graph.mpsgraph.multiplication(inputTensor, tanhPlus1, name: nil)
+        let const3Tensor = graph.mpsgraph.constant(0.5, shape: [1 as NSNumber], dataType: inputType)
+        let GELUResult = graph.mpsgraph.multiplication(const3Tensor, timesX, name: nil)
+
+        return GELUResult
+    }
+}
+
 ///   Node to perform the ELU activation function on the input tensor
 public class ELU : UnaryNode {
     let alpha: Double
@@ -211,6 +254,7 @@ public enum ActivationFunction {
     case leakyRelu(Double)
     case leakyReluFromTensor(String)
     case gelu
+    case gelu_tanh_approx
     case elu(Double)
 
     func addActivation(graph: Graph, inputTensor: MPSGraphTensor, name: String?) throws -> MPSGraphTensor? {
@@ -240,8 +284,11 @@ public enum ActivationFunction {
             case .gelu:
                 let geluResult = GELU.addGELU(graph: graph, inputTensor: inputTensor)
                 return geluResult
+            case .gelu_tanh_approx:
+                let geluResult = GELU_tanh_approx.addGELU_tanh_approx(graph: graph, inputTensor: inputTensor)
+                return geluResult
             case .elu(let alpha):
-            let eluResult = ELU.addELU(graph: graph, inputTensor: inputTensor, alpha: alpha)
+                let eluResult = ELU.addELU(graph: graph, inputTensor: inputTensor, alpha: alpha)
                 return eluResult
         }
 

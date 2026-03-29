@@ -252,7 +252,7 @@ Discussion of how to use this graph is in a later section.
 
 ###  Optimizers
 
-The 'learnWithRespectTo' modifier for layers sets the learning modes for the learnable layer and the loss function it should learn against, but it also allows you to optionally set the optimization strategy for the layer.  It defaults to a standard stochastic gradient descent, but can be set to an 'adam' optimizer, with or without a maximum velocity value, or the MUON optimizer.
+The 'learnWithRespectTo' modifier for layers sets the learning modes for the learnable layer and the loss function it should learn against, but other modifiers allows you to optionally set the optimization strategy for the layer.  These modifiers have names like 'weightOptimizer' and 'weightLearningOptions'.  See the article on <doc:NeuralNetworks> for more information.  They always default to a standard stochastic gradient descent, but can be set to an 'adam' optimizer, with or without a maximum velocity value, or the MUON optimizer.
 
 The stochastic gradient descent updates the learnable parameters based on a fraction (the learning rate) of the current gradient of the parameter relative to the loss the function specified.  Only the learning rate parameter will be used for this option.
 
@@ -355,6 +355,41 @@ _ = try await classificationGraph.runTraining(mode: "learn", trainingDataSet: tr
 This method runs all samples in DataSet 'trainingDataSet' through the graph 'classificationGraph' in mode "learn", performing the learning operations and updating any Variables that are marked to learn versus a loss function.  The input values an expected result nodes must be identified so the method can set up the input dictionary with both PlaceHolder tensors.  Optional parameters on the function allow you to use a subset of the training DataSet as the test inputs and to request the total loss for the run to be returned.
 
 All of these functions can be used with batch Graphs.  In these cases the number of samples for testing must be a multiple of the batch size and the epoch size for training indicates the number of batches run, rather than individual samples.
+
+###  Encoding Multiple Operations
+
+Creating command buffers for each operation can get expensive (CPU-wise) when running multiple iterations through a graph.  To address this there is a set of methods on the ``Graph``  class to allow you to encode multiple operations onto a single command buffer before committing them to the GPU for processing.  This methodology requires a callback closure for any handling of result tensors, but this can be ommitted if no post-run processing is needed like is common with learning passes.  An example code using these functions follows:
+
+```swift
+lossTotal = 0.0
+for _ in 0..<evaluation_iterations {
+    let tensors = try await dataSource.get_batch(fromTesting: true)
+    let completionHandler: Graph.MPSGraphDSLEncodeCompletionHandler = { (results: [String: Tensor]) -> Void in
+        let result = results["crossEntropy"]!
+        do {
+            let loss = try result.getElement(index: 0)
+            lossTotal += Float32(loss)
+        } catch { fatalError("error getting element from result tensor") }
+    }
+    try graph.encodeWithoutCommit(mode: "crossEntropy", inputTensors: ["inputs": tensors.inputs, "targets" : tensors.targets], completionHandler: completionHandler)
+}
+try graph.commitBuffer()
+let validation_losses : Float32 = lossTotal / Float32(evaluation_iterations)
+```
+
+The above code encodes 'evaluation_iterations' operations on a command buffer before committing them for execution after the for loop.  A completion handler is used to accumulate the total loss from a target tensor in the graph.  The completion handler has a signature of 'Graph.MPSGraphDSLEncodeCompletionHandler', and gets the resulting target tensors (from node 'crossEntropy' in the example) from the graph run..  The encoding is done by the 'encodeWithoutCommit' method, and the commit for processing done by the 'commitBuffer' method.
+
+###  Using a Compiled Graph
+
+When using a Graph in the previous examples, the operations are sent to the GPU/Neural Engine separately for execution.  A speedup can happen if you 'compile' the graph into a single executable.  Some of the operations can be 'fused' into combined kernals, and other optimizations can happen.  The downside is that you must specify the inputs and targets up front for the compile, so things are a little less flexible in what you can do.  To compile a graph, use the 'compileForMode' method as shown in the following code example:
+
+```swift
+try graph.compileForMode("runTest")
+```
+
+You can compile a graph for more than one mode, but the executables will be cached on the GPU, so memory can be an issue in some instances.  If the mode uses a non-fixed-size input (-1 on a shape dimension), the compilation will likely fail since the unknown tensor sizes does not allow compilation of the workflow.
+
+To run operations on a compile graph you can use either the 'encodeForExecutable' or 'encodeWithoutCommitForExecutable' methods.  While under-the-hood there are several differences to running an graph or a compiled executable, MPSGraphDSL attempts to hide these differences.  The above to methods are drop-in replacements for the 'encodeOne' and 'encodeWithoutCommit' methods described above, only having the additional requirement of the graph being compiled for the specified mode previously.
 
 ##  SubGraphs
 

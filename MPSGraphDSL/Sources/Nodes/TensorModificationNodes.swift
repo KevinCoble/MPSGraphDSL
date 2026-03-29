@@ -2113,16 +2113,19 @@ public class Dropout : UnaryNode {
     let rate: Double
     let rateTensor: String?
     let useRateTensor: Bool
+    let trainingOnly: Bool
 
     /// Create a dropout operation using a supplied rate
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - rate: The rate for the dropout (fraction of elements removed)
+    ///   - trainingOnly: (Optional) If true (the default) the dropout command is put inside an if operation to only be active when in a training (learning) mode
     ///   - name: (Optional) The name for this node and its associated tensor
-    public init(_ input: String? = nil, rate: Double, name: String? = nil) {
+    public init(_ input: String? = nil, rate: Double, trainingOnly: Bool = true, name: String? = nil) {
         self.rate = rate
         self.rateTensor = nil
         useRateTensor = false
+        self.trainingOnly = trainingOnly
         super.init(input: input, name: name)
     }
 
@@ -2130,11 +2133,13 @@ public class Dropout : UnaryNode {
     /// - Parameters:
     ///   - input: (Optional) The name of the tensor that will provide the input operand.  If nil the previous node's output will be used
     ///   - rateTensor: The tensor that will suply the rate for the dropout (fraction of elements removed)
+    ///   - trainingOnly: (Optional) If true (the default) the dropout command is put inside an if operation to only be active when in a training (learning) mode
     ///   - name: (Optional) The name for this node and its associated tensor
-    public init(_ input: String? = nil, rateTensor: String? = nil, name: String? = nil) {
+    public init(_ input: String? = nil, rateTensor: String? = nil, trainingOnly: Bool = true, name: String? = nil) {
         self.rate = 0
         self.rateTensor = rateTensor
         useRateTensor = true
+        self.trainingOnly = trainingOnly
         super.init(input: input, name: name)
     }
 
@@ -2143,18 +2148,50 @@ public class Dropout : UnaryNode {
         let inputTensor = try graph.getUnaryTensor(name: inputName)
         
         //  Add to the graph itself
-        let result: MPSGraphTensor
-        if (useRateTensor) {
-            let rateMPSTensor = try graph.getOptionalTensor(rateTensor)
+        if (trainingOnly) {
+            //  Add or get the training flag tensor
+            let trainingModeTensor = graph.getTrainingModeTensor()
+            
+            //  Get a name for the dropout tensor
+            var dropoutName = graph.getFullName(name)
+            if let dName = dropoutName {
+                dropoutName = dName + "_dropout"
+            }
 
-            result = graph.mpsgraph.dropout(inputTensor, rate: rateMPSTensor, name: graph.getFullName(name))
-       }
-        else {
-            result = graph.mpsgraph.dropout(inputTensor, rate: rate, name: graph.getFullName(name))
+            //  Get the dropout tensor
+            let dropout: MPSGraphTensor
+            if (useRateTensor) {
+                let rateMPSTensor = try graph.getOptionalTensor(rateTensor)
+                
+                dropout = graph.mpsgraph.dropout(inputTensor, rate: rateMPSTensor, name: dropoutName)
+            }
+            else {
+                dropout = graph.mpsgraph.dropout(inputTensor, rate: rate, name: dropoutName)
+            }
+
+            let results = graph.mpsgraph.if(trainingModeTensor, then: { () -> [MPSGraphTensor] in
+                return [dropout]
+            }, else: { () -> [MPSGraphTensor] in
+                return [inputTensor]
+            }, name: graph.getFullName(name))
+
+            return [results[0]]
         }
         
-        //  Remember the output tensor and shape for later
-        return [result]
+        else {
+            let result: MPSGraphTensor
+            if (useRateTensor) {
+                let rateMPSTensor = try graph.getOptionalTensor(rateTensor)
+                
+                result = graph.mpsgraph.dropout(inputTensor, rate: rateMPSTensor, name: graph.getFullName(name))
+            }
+            else {
+                result = graph.mpsgraph.dropout(inputTensor, rate: rate, name: graph.getFullName(name))
+            }
+            
+            //  Remember the output tensor and shape for later
+            return [result]
+        }
     }
 }
 

@@ -124,7 +124,7 @@ public class ConvolutionLayer: UnaryNode {
         switch (activationFunction) {
             case .none, .tanh, .sigmoid:
                 weightInitialization = .XavierGlorotNormal
-            case .relu, .leakyRelu, .leakyReluFromTensor, .gelu, .elu:
+        case .relu, .leakyRelu, .leakyReluFromTensor, .gelu, .gelu_tanh_approx, .elu:
                 weightInitialization = .HeNormal
         }
         super.init(input: input, name: name)
@@ -151,7 +151,7 @@ public class ConvolutionLayer: UnaryNode {
         switch (activationFunction) {
             case .none, .tanh, .sigmoid:
                 weightInitialization = .XavierGlorotNormal
-            case .relu, .leakyRelu, .leakyReluFromTensor, .gelu, .elu:
+        case .relu, .leakyRelu, .leakyReluFromTensor, .gelu, .gelu_tanh_approx, .elu:
                 weightInitialization = .HeNormal
         }
         super.init(input: input, name: name)

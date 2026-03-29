@@ -73,6 +73,7 @@ Reading the five articles referenced above will definitely get you well on your 
 
 ### Neural Networks
 
+- ``Linear``
 - ``FullyConnectedLayer``
 - ``LSTMLayer``
 - ``ConvolutionLayer``

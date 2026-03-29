@@ -91,6 +91,10 @@ public class Graph {
     internal var mpsgraph : MPSGraph!
     internal var device : MTLDevice!
     internal var commandQueue : MTLCommandQueue!
+    internal var commandBuffer : MPSCommandBuffer?
+    internal var executables: [String: MPSGraphExecutable] = [:]        //  Executable for each compiled mode
+    internal var executableResults: [String: [MPSGraphTensorData]?] = [:]        //  Target data for each target of a compiled mode
+    internal var executableTargetNames: [String: [String]] = [:]        //  Target name for each target of a compiled mode
 
     //  Build variables
     internal var allAddedNodes : [AddedNode] = []
@@ -783,47 +787,21 @@ public class Graph {
        return returnTensors
     }
     
-    //  Get the metal command buffer
+    //  Get the metal command queue
     internal func getCommandQueue() {
         device = MTLCreateSystemDefaultDevice()!
         commandQueue = device.makeCommandQueue()!
     }
     
-    /// Run a single input tensor (or single set if multiple inputs are required) through the graph, returning the output tensors
-    ///       If the graph has not been built yet, it is built at the start of this function - see BuildGraph for errors that occur from the build process
-    ///       If the graph is a batch graph, all the input tensors (that are not batch exempt) must be sized with the batch dimension or none of them.  If none, the function will fill a batch tensor with the (assumed) single inputs and extract the single results from the returned batch tensors
-    ///       Only use this function if you are only running a few cases.  More that a few hundred can cause memory errors in Metal.  Use 'encodeOne' instead for larger runs
+    /// Set new run parameters for learning rate and optimizer parameters.  Use before run or encode operations
     /// - Parameters:
-    ///   - mode: The mode that specifies what output tensors are to be computed
-    ///   - inputTensors: an dictionary of input tensors to feed to the graph, with the key being the ``PlaceHolder`` name
-    ///   - newLearningRate: (Optional) if a non-constant learning rate is specified (see ``Learning``), the value can be changed for subsequent runs with this parameter
-    ///   - newβ1: (Optional) if a non-constant β1 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
-    ///   - newβ2: (Optional) if a non-constant β2 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
-    ///   - newϵ: (Optional) if a non-constant ϵ parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
-    /// - Returns: an array of output tensors that are the result of the graph run
-    public func runOne(mode: String, inputTensors: [String : Tensor], newLearningRate: Double? = nil, newβ1: Double? = nil, newβ2: Double? = nil, newϵ: Double? = nil, newμ: Double? = nil) throws -> [String : Tensor] {
-        //  Get the graph ready
-        if (mpsgraph == nil) { try buildGraph() }
-        if (device == nil) { getCommandQueue() }
-        
-        //  Verify the input tensors are usable
-        var allAreBatchTensors: Bool = true
-        for (key, value) in inputTensors {
-            if (!value.type.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
-            if (batchGraph) {
-                //  Check if we need a batch dimension on the tensor
-                if let feedInfo = feedTensors.first(where: { $0.name == key }) {
-                    if (!feedInfo.batchExemption) {
-                        if (!value.shape.firstDimensionIsBatchSize(batchSize)) { allAreBatchTensors = false }
-                    }
-                }
-                else {
-                    throw MPSGraphRunErrors.PlaceHolderInputNotFound(key)
-                }
-            }
-        }
-
-        //  If a new learning rate or adam optimization parameter entered - set it
+    ///   - newLearningRate: The new learning rate
+    ///   - newβ1: The new β1 for adam optimizers
+    ///   - newβ2: The new β2 for adam optimizers
+    ///   - newϵ: The new ϵ  for adam and MUON optimizers
+    ///   - newμ: The new μ  for  MUON optimizers
+    public func setNewRunParameters(newLearningRate: Double? = nil, newβ1: Double? = nil, newβ2: Double? = nil, newϵ: Double? = nil, newμ: Double? = nil) {
+        //  If a new learning rate or optimization parameter entered - set it
         if let newlearningRate = newLearningRate {
             learningRate = newlearningRate
         }
@@ -839,57 +817,26 @@ public class Graph {
         if let newμ = newμ {
             μ = newμ
         }
+    }
+    
+    /// Run a single input tensor (or single set if multiple inputs are required) through the graph, returning the output tensors
+    ///       If the graph has not been built yet, it is built at the start of this function - see BuildGraph for errors that occur from the build process
+    ///       If the graph is a batch graph, all the input tensors (that are not batch exempt) must be sized with the batch dimension or none of them.  If none, the function will fill a batch tensor with the (assumed) single inputs and extract the single results from the returned batch tensors
+    ///       Only use this function if you are only running a few cases.  More that a few hundred can cause memory errors in Metal.  Use 'encodeOne' instead for larger runs
+    /// - Parameters:
+    ///   - mode: The mode that specifies what output tensors are to be computed
+    ///   - inputTensors: an dictionary of input tensors to feed to the graph, with the key being the ``PlaceHolder`` name
+    /// - Returns: an array of output tensors that are the result of the graph run
+    public func runOne(mode: String, inputTensors: [String : Tensor]) throws -> [String : Tensor] {
+        //  Get the graph ready
+        if (mpsgraph == nil) { try buildGraph() }
+        if (device == nil) { getCommandQueue() }
+        
+        //  Verify the input tensors are usable
+        let allAreBatchTensors = try verifyInputTensors(inputTensors)
 
         //  Convert the tensors to MPS version and create the feed dictionary
-        var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [:]
-        for feedTensor in feedTensors {
-            //  Find the input tensor that matches
-            if let inputTensor = inputTensors.first(where: { $0.key == feedTensor.name }) {
-                if (!allAreBatchTensors && !feedTensor.batchExemption) {
-                    //  Repeat the tensor batchSize times to make a batch tensor out of it
-                    let batchTensorShape = inputTensor.value.shape.shapeWithAddedBatchDimension(batchSize)
-                    var batchTensor = CreateTensor.constantValues(type: inputTensor.value.type, shape: batchTensorShape, initialValue: 0.0)
-                    for i in 0..<batchSize {
-                        try batchTensor.setBatchSample(tensor: inputTensor.value, batchIndex: i)
-                    }
-                    feedDict[feedTensor.tensor] = try batchTensor.getMPSGraphTensorData(forGraph: self)
-                }
-                else {
-                    feedDict[feedTensor.tensor] = try inputTensor.value.getMPSGraphTensorData(forGraph: self)
-                }
-            }
-            else {
-                if (feedTensor.neededForMode(mode)) {
-                    throw MPSGraphRunErrors.PlaceHolderInputNotFound(feedTensor.name)
-                }
-            }
-        }
-        if (!learningRateConstant) {
-            let learningRateValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(learningRate))
-            feedDict[learningRateTensor!] = try learningRateValueTensor.getMPSGraphTensorData(forGraph: self)
-        }
-        if (!β1Constant && β1Tensor != nil) {
-            let β1ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β1))
-            feedDict[β1Tensor!] = try β1ValueTensor.getMPSGraphTensorData(forGraph: self)
-        }
-        if (!β2Constant && β2Tensor != nil) {
-            let β2ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β2))
-            feedDict[β2Tensor!] = try β2ValueTensor.getMPSGraphTensorData(forGraph: self)
-        }
-        if (!ϵConstant && ϵTensor != nil) {
-            let ϵValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(ϵ))
-            feedDict[ϵTensor!] = try ϵValueTensor.getMPSGraphTensorData(forGraph: self)
-        }
-        if (!μConstant && μTensor != nil) {
-            let μValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(μ))
-            feedDict[μTensor!] = try μValueTensor.getMPSGraphTensorData(forGraph: self)
-        }
-
-        //  If there is a training/testing mode tensor, add it to the feed
-        if (trainingModeTensor != nil) {
-            let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : learningModes.contains(mode) ? 1 : 0)
-            feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
-        }
+        let feedDict = try createFeedDict(inputTensors: inputTensors, allAreBatchTensors: allAreBatchTensors, mode: mode)
 
         //  Get the targetTensors
         var targets : [MPSGraphTensor] = []
@@ -900,26 +847,9 @@ public class Graph {
         }
         if (targets.isEmpty) { throw MPSGraphDSLErrors.NoTargetsInGraph }
         
-        //  Set up any learning operations
-        var targetOperations : [MPSGraphOperation]? = nil
-        if (learningModes.contains(mode)) {
-            targetOperations = learningOps
-            //  Add the node learning operations
-            targetOperations! += nodeLearningOps
-        }
-        else {
-            if (!nodeNonLearningOps.isEmpty) {
-                //  Add any non-learning node operations
-                if (targetOperations == nil) {
-                    targetOperations = nodeNonLearningOps
+        //  Set up any operations
+        let targetOperations = getOperations(mode: mode)
 
-                }
-                else {
-                    targetOperations! += nodeNonLearningOps
-                }
-            }
-        }
-        
         //  Run the graph
         let results = mpsgraph.run(feeds: feedDict,
                                    targetTensors: targets,
@@ -950,108 +880,24 @@ public class Graph {
     /// Run a single input tensor (or single set if multiple inputs are required) through the graph, returning the output tensors
     ///       If the graph has not been built yet, it is built at the start of this function - see BuildGraph for errors that occur from the build process
     ///       If the graph is a batch graph, all the input tensors (that are not batch exempt) must be sized with the batch dimension or none of them.  If none, the function will fill a batch tensor with the (assumed) single inputs and extract the single results from the returned batch tensors
-    ///       Only use this function if you are only running a few cases.  More that a few hundred can cause memory errors in Metal.  Use 'encodeOne' instead for larger runs
     /// - Parameters:
     ///   - mode: The mode that specifies what output tensors are to be computed
     ///   - inputTensors: an dictionary of input tensors to feed to the graph, with the key being the ``PlaceHolder`` name
     ///   - waitForResults: (Optional) defaults to true.  If true the operation waits for the results back from Metal.  If not needed (e.g. during training operations), set to false
-    ///   - newLearningRate: (Optional) if a non-constant learning rate is specified (see ``Learning``, the value can be changed for subsequent runs with this parameter
-    ///   - newβ1: (Optional) if a non-constant β1 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
-    ///   - newβ2: (Optional) if a non-constant β2 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
-    ///   - newϵ: (Optional) if a non-constant ϵ parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
     /// - Returns: an array of output tensors that are the result of the graph run
-    public func encodeOne(mode: String, inputTensors: [String : Tensor], waitForResults: Bool = true, newLearningRate: Double? = nil, newβ1: Double? = nil, newβ2: Double? = nil, newϵ: Double? = nil, newμ: Double? = nil) throws -> [String : Tensor] {
+    public func encodeOne(mode: String, inputTensors: [String : Tensor], waitForResults: Bool = true) throws -> [String : Tensor] {
         //  Get the graph ready
         if (mpsgraph == nil) { try buildGraph() }
         if (device == nil) { getCommandQueue() }
         
         //  Verify the input tensors are usable
-        var allAreBatchTensors: Bool = true
-        for (key, value) in inputTensors {
-            if (!value.type.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
-            if (batchGraph) {
-                //  Check if we need a batch dimension on the tensor
-                if let feedInfo = feedTensors.first(where: { $0.name == key }) {
-                    if (!feedInfo.batchExemption) {
-                        if (!value.shape.firstDimensionIsBatchSize(batchSize)) { allAreBatchTensors = false }
-                    }
-                }
-                else {
-                    throw MPSGraphRunErrors.PlaceHolderInputNotFound(key)
-                }
-            }
-        }
+        let allAreBatchTensors = try verifyInputTensors(inputTensors)
 
-        let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
+        //  Get a command buffer
+        let localCommandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
         
-        //  If a new learning rate or adam optimization parameter entered - set it
-        if let newlearningRate = newLearningRate {
-            learningRate = newlearningRate
-        }
-        if let newβ1 = newβ1 {
-            β1 = newβ1
-        }
-        if let newβ2 = newβ2 {
-            β2 = newβ2
-        }
-        if let newϵ = newϵ {
-            ϵ = newϵ
-        }
-        if let newμ = newμ {
-            μ = newμ
-        }
-
         //  Convert the tensors to MPS version and create the feed dictionary
-        var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [:]
-        for feedTensor in feedTensors {
-            //  Find the input tensor that matches
-            if let inputTensor = inputTensors.first(where: { $0.key == feedTensor.name }) {
-                if (!allAreBatchTensors && !feedTensor.batchExemption) {
-                    //  Repeat the tensor batchSize times to make a batch tensor out of it
-                    let batchTensorShape = inputTensor.value.shape.shapeWithAddedBatchDimension(batchSize)
-                    var batchTensor = CreateTensor.constantValues(type: inputTensor.value.type, shape: batchTensorShape, initialValue: 0.0)
-                    for i in 0..<batchSize {
-                        try batchTensor.setBatchSample(tensor: inputTensor.value, batchIndex: i)
-                    }
-                    feedDict[feedTensor.tensor] = try batchTensor.getMPSGraphTensorData(forGraph: self)
-                }
-                else {
-                    feedDict[feedTensor.tensor] = try inputTensor.value.getMPSGraphTensorData(forGraph: self)
-                }
-            }
-            else {
-                if (feedTensor.neededForMode(mode)) {
-                    throw MPSGraphRunErrors.PlaceHolderInputNotFound(feedTensor.name)
-                }
-            }
-        }
-        if (!learningRateConstant) {
-            let learningRateValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(learningRate))
-            feedDict[learningRateTensor!] = try learningRateValueTensor.getMPSGraphTensorData(forGraph: self)
-        }
-        if (!β1Constant && β1Tensor != nil) {
-            let β1ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β1))
-            feedDict[β1Tensor!] = try β1ValueTensor.getMPSGraphTensorData(forGraph: self)
-        }
-        if (!β2Constant && β2Tensor != nil) {
-            let β2ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β2))
-            feedDict[β2Tensor!] = try β2ValueTensor.getMPSGraphTensorData(forGraph: self)
-        }
-        if (!ϵConstant && ϵTensor != nil) {
-            let ϵValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(ϵ))
-            feedDict[ϵTensor!] = try ϵValueTensor.getMPSGraphTensorData(forGraph: self)
-        }
-        if (!μConstant && μTensor != nil) {
-            let μValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(μ))
-            feedDict[μTensor!] = try μValueTensor.getMPSGraphTensorData(forGraph: self)
-        }
-
-        //  If there is a training/testing mode tensor, add it to the feed
-        if (trainingModeTensor != nil) {
-            let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : learningModes.contains(mode) ? 1 : 0)
-            feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
-
-        }
+        let feedDict = try createFeedDict(inputTensors: inputTensors, allAreBatchTensors: allAreBatchTensors, mode: mode)
 
         //  Get the targetTensors
         var targets : [MPSGraphTensor] = []
@@ -1062,35 +908,18 @@ public class Graph {
         }
         if (targets.isEmpty) { throw MPSGraphDSLErrors.NoTargetsInGraph }
         
-        //  Set up any learning operations
-        var targetOperations : [MPSGraphOperation]? = nil
-        if (learningModes.contains(mode)) {
-            targetOperations = learningOps
-            //  Add the node learning operations
-            targetOperations! += nodeLearningOps
-        }
-        else {
-            if (!nodeNonLearningOps.isEmpty) {
-                //  Add any non-learning node operations
-                if (targetOperations == nil) {
-                    targetOperations = nodeNonLearningOps
-
-                }
-                else {
-                    targetOperations! += nodeNonLearningOps
-                }
-            }
-        }
+        //  Set up any operations
+        let targetOperations = getOperations(mode: mode)
 
         //  Run the graph
-        let results = mpsgraph.encode(to: commandBuffer,
+        let results = mpsgraph.encode(to: localCommandBuffer,
                                       feeds: feedDict,
                                       targetTensors: targets,
                                       targetOperations: targetOperations,
                                       executionDescriptor: nil)
         
-        commandBuffer.commit()
-        if (waitForResults) { commandBuffer.waitUntilCompleted() }
+        localCommandBuffer.commit()
+        if (waitForResults) { localCommandBuffer.waitUntilCompleted() }
         
         var resultTensors : [String: Tensor] = [:]
         for (tensor, data) in results {
@@ -1114,6 +943,413 @@ public class Graph {
         return resultTensors
     }
     
+    ///  Completion handler definition for encodeWithoutCommit
+    public typealias MPSGraphDSLEncodeCompletionHandler = ([String : Tensor])->Void
+    
+    /// Encode a single input tensor (or single set if multiple inputs are required) onto the command buffer.  Must use 'commitBuffer' function later to run encoded operations
+    /// Results are not returned, and must be processed in a provided callback
+    ///       If the command buffer has not been created yet, it is done first
+    ///       If the graph has not been built yet, it is built at the start of this function - see BuildGraph for errors that occur from the build process
+    ///       If the graph is a batch graph, all the input tensors (that are not batch exempt) must be sized with the batch dimension or none of them.  If none, the function will fill a batch tensor with the (assumed) single inputs and extract the single results from the returned batch tensors
+    /// - Parameters:
+    ///   - mode: The mode that specifies what output tensors are to be computed
+    ///   - inputTensors: an dictionary of input tensors to feed to the graph, with the key being the ``PlaceHolder`` name
+    public func encodeWithoutCommit(mode: String, inputTensors: [String : Tensor], completionHandler: MPSGraphDSLEncodeCompletionHandler? = nil) throws {
+        //  Get the graph ready
+        if (mpsgraph == nil) { try buildGraph() }
+        if (device == nil) { getCommandQueue() }
+        
+        //  Verify the input tensors are usable
+        let allAreBatchTensors = try verifyInputTensors(inputTensors)
+
+        //  Get the command buffer
+        if (commandBuffer == nil) { commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!) }
+        
+        //  Convert the tensors to MPS version and create the feed dictionary
+        let feedDict = try createFeedDict(inputTensors: inputTensors, allAreBatchTensors: allAreBatchTensors, mode: mode)
+
+        //  Get the targetTensors
+        var targets : [MPSGraphTensor] = []
+        var resultDictionary : [MPSGraphTensor : String] = [:]
+        for targetTensor in targetTensors {
+            if targetTensor.modes.contains(mode) {
+                targets.append(targetTensor.tensor)
+                if let addedNode = findMPSGraphTensor(targetTensor.tensor) {
+                    resultDictionary[targetTensor.tensor] = addedNode.name
+                }
+            }
+        }
+        if (targets.isEmpty) { throw MPSGraphDSLErrors.NoTargetsInGraph }
+        
+        //  Set up any operations
+        let targetOperations = getOperations(mode: mode)
+        
+        //  If we have a completion handler, add it
+        var executionDescriptor : MPSGraphExecutionDescriptor? = nil
+        if let completionHandler = completionHandler {
+            executionDescriptor = MPSGraphExecutionDescriptor()
+            executionDescriptor!.completionHandler = { (resultsDictionary, nil) in
+                var resultTensors : [String: Tensor] = [:]
+                for (tensor, data) in resultsDictionary {
+                    //  Find the name of the tensor
+                    if let nodeName = resultDictionary[tensor] {
+                        resultTensors[nodeName] = CreateTensor.fromMPSTensorData(data)
+                    }
+                }
+                completionHandler(resultTensors)
+            }
+        }
+
+        //  encode the operation to the graph
+        let _ = mpsgraph.encode(to: commandBuffer!,
+                                      feeds: feedDict,
+                                      targetTensors: targets,
+                                      targetOperations: targetOperations,
+                                      executionDescriptor: executionDescriptor)
+    }
+    
+    /// Commit the Metal command buffer with the encoded operations
+    /// - Parameter waitForResults: if true (the default value), the function waits for completion of the command buffer operations before returning
+    public func commitBuffer(waitForResults: Bool = true) throws {
+        //  Make sure we have some operations
+        if (commandBuffer == nil) { throw MPSGraphRunErrors.NoEncodedOperations }
+        
+        //  Commit the operations
+        commandBuffer!.commit()
+        if (waitForResults) { commandBuffer!.waitUntilCompleted() }
+        
+        //  Set commandBuffer to nil to start process over
+        commandBuffer = nil
+    }
+    
+    ///  Return true if uncommitted operations remain
+    public var haveUncommitedOperations: Bool { return (commandBuffer != nil) }
+    
+    //  Make sure the input tensors are of a usable type, have a placeholder, and return flag if all have batch dimensions
+    internal func verifyInputTensors(_ inputTensors: [String : Tensor]) throws -> Bool {
+        var allAreBatchTensors: Bool = true
+        for (key, value) in inputTensors {
+            if (!value.type.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
+            if (batchGraph) {
+                //  Check if we need a batch dimension on the tensor
+                if let feedInfo = feedTensors.first(where: { $0.name == key }) {
+                    if (!feedInfo.batchExemption) {
+                        if (!value.shape.firstDimensionIsBatchSize(batchSize)) { allAreBatchTensors = false }
+                    }
+                }
+                else {
+                    throw MPSGraphRunErrors.PlaceHolderInputNotFound(key)
+                }
+            }
+        }
+        
+        return allAreBatchTensors
+    }
+    
+    //  Create the feed dictionary for the run
+    internal func createFeedDict(inputTensors: [String : Tensor], allAreBatchTensors: Bool, mode: String) throws -> [MPSGraphTensor: MPSGraphTensorData] {
+        var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [:]
+        for feedTensor in feedTensors {
+            //  Find the input tensor that matches
+            if let inputTensor = inputTensors.first(where: { $0.key == feedTensor.name }) {
+                if (!allAreBatchTensors && !feedTensor.batchExemption) {
+                    //  Repeat the tensor batchSize times to make a batch tensor out of it
+                    let batchTensorShape = inputTensor.value.shape.shapeWithAddedBatchDimension(batchSize)
+                    var batchTensor = CreateTensor.constantValues(type: inputTensor.value.type, shape: batchTensorShape, initialValue: 0.0)
+                    for i in 0..<batchSize {
+                        try batchTensor.setBatchSample(tensor: inputTensor.value, batchIndex: i)
+                    }
+                    feedDict[feedTensor.tensor] = try batchTensor.getMPSGraphTensorData(forDevice: device)
+                }
+                else {
+                    feedDict[feedTensor.tensor] = try inputTensor.value.getMPSGraphTensorData(forDevice: device)
+                }
+            }
+            else {
+                if (feedTensor.neededForMode(mode)) {
+                    throw MPSGraphRunErrors.PlaceHolderInputNotFound(feedTensor.name)
+                }
+            }
+        }
+        if (!learningRateConstant) {
+            let learningRateValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(learningRate))
+            feedDict[learningRateTensor!] = try learningRateValueTensor.getMPSGraphTensorData(forDevice: device)
+        }
+        if (!β1Constant && β1Tensor != nil) {
+            let β1ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β1))
+            feedDict[β1Tensor!] = try β1ValueTensor.getMPSGraphTensorData(forDevice: device)
+        }
+        if (!β2Constant && β2Tensor != nil) {
+            let β2ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β2))
+            feedDict[β2Tensor!] = try β2ValueTensor.getMPSGraphTensorData(forDevice: device)
+        }
+        if (!ϵConstant && ϵTensor != nil) {
+            let ϵValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(ϵ))
+            feedDict[ϵTensor!] = try ϵValueTensor.getMPSGraphTensorData(forDevice: device)
+        }
+        if (!μConstant && μTensor != nil) {
+            let μValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(μ))
+            feedDict[μTensor!] = try μValueTensor.getMPSGraphTensorData(forDevice: device)
+        }
+
+        //  If there is a training/testing mode tensor, add it to the feed
+        if (trainingModeTensor != nil) {
+            let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : learningModes.contains(mode) ? 1 : 0)
+            feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forDevice: device)
+        }
+
+        return feedDict
+    }
+    
+    //  Get the operations to perform for the run
+    internal func getOperations(mode: String) -> [MPSGraphOperation]? {
+        var targetOperations : [MPSGraphOperation]? = nil
+        if (learningModes.contains(mode)) {
+            targetOperations = learningOps
+            //  Add the node learning operations
+            targetOperations! += nodeLearningOps
+        }
+        else {
+            if (!nodeNonLearningOps.isEmpty) {
+                //  Add any non-learning node operations
+                if (targetOperations == nil) {
+                    targetOperations = nodeNonLearningOps
+
+                }
+                else {
+                    targetOperations! += nodeNonLearningOps
+                }
+            }
+        }
+
+        return targetOperations
+    }
+    
+    public func compileForMode(_ mode: String) throws {
+        //  Get the graph ready
+        if (mpsgraph == nil) { try buildGraph() }
+        if (device == nil) { getCommandQueue() }
+        
+        //  Create the feed-shapetype dictionary from the placeholders
+        var feedShapes: [MPSGraphTensor : MPSGraphShapedType] = [:]
+        for feedTensor in feedTensors {
+            if feedTensor.neededForMode(mode) {
+                let shapeType = MPSGraphShapedType(shape: feedTensor.tensor.shape, dataType: feedTensor.tensor.dataType)
+                feedShapes[feedTensor.tensor] = shapeType
+            }
+        }
+        
+        //  Add the learning parameter placeholders to the feed list as needed
+        let learningConstantShapeType = MPSGraphShapedType(shape: [NSNumber(value: 1)], dataType: .float32)
+        if (!learningRateConstant) { feedShapes[learningRateTensor!] = learningConstantShapeType }
+        if (!β1Constant && β1Tensor != nil) { feedShapes[β1Tensor!] = learningConstantShapeType }
+        if (!β2Constant && β2Tensor != nil) { feedShapes[β2Tensor!] = learningConstantShapeType }
+        if (!ϵConstant && ϵTensor != nil) { feedShapes[ϵTensor!] = learningConstantShapeType }
+        if (!μConstant && μTensor != nil) { feedShapes[μTensor!] = learningConstantShapeType }
+        if (trainingModeTensor != nil) {
+            let trainingModeShapeType = MPSGraphShapedType(shape: [NSNumber(value: 1)], dataType: .int32)
+            feedShapes[trainingModeTensor!] = trainingModeShapeType
+        }
+        
+        //  Get the target tensors and create MPSGraphTensorData objects for each of them
+        var targets : [MPSGraphTensor] = []
+        var targetData: [MPSGraphTensorData] = []
+        var targetNames: [String] = []
+        for targetTensor in targetTensors {
+            if targetTensor.modes.contains(mode) {
+                targets.append(targetTensor.tensor)
+                let dataDescriptor = MPSNDArrayDescriptor(dataType: targetTensor.tensor.dataType, shape: targetTensor.tensor.shape!)
+                let NDArray = MPSNDArray(device: device, descriptor: dataDescriptor)
+                targetData.append(MPSGraphTensorData(NDArray))
+                let addedNode = findMPSGraphTensor(targetTensor.tensor)
+                if let addedNode = addedNode {
+                    targetNames.append(addedNode.name!)
+                }
+                else {
+                    throw MPSGraphRunErrors.TargetTensorNotFoundInGraph
+                }
+            }
+        }
+        if (targets.isEmpty) { throw MPSGraphDSLErrors.NoTargetsInGraph }
+        executableResults[mode] = targetData            //  Target data for each target of a compiled mode
+        executableTargetNames[mode] = targetNames       //  Target name for each target of a compiled mode
+
+        //  Get the operations
+        let ops = getOperations(mode: mode)
+        
+        //  Get the compilation descriptor
+        let descriptor = MPSGraphCompilationDescriptor()
+        
+        executables[mode] = mpsgraph.compile(
+            with: MPSGraphDevice(mtlDevice: device),
+            feeds: feedShapes,
+            targetTensors: targets,
+            targetOperations: ops,
+            compilationDescriptor: descriptor)
+        
+    }
+    
+    public func encodeForExecutable(mode: String, inputTensors: [String : Tensor]) throws -> [String : Tensor] {
+        if (executables[mode] == nil) { throw MPSGraphRunErrors.NoCompiledExecutableForMode }
+
+        //  Get a command buffer
+        let localCommandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
+
+        //  Verify the input tensors are usable
+        let allAreBatchTensors = try verifyInputTensors(inputTensors)
+
+        //  Get the input tensors - must be in same order as compile!
+        var feedData: [MPSGraphTensorData] = []
+        for feedTensor in feedTensors {
+            //  Find the input tensor that matches
+            if let inputTensor = inputTensors.first(where: { $0.key == feedTensor.name }) {
+                if (!allAreBatchTensors && !feedTensor.batchExemption) {
+                    //  Repeat the tensor batchSize times to make a batch tensor out of it
+                    let batchTensorShape = inputTensor.value.shape.shapeWithAddedBatchDimension(batchSize)
+                    var batchTensor = CreateTensor.constantValues(type: inputTensor.value.type, shape: batchTensorShape, initialValue: 0.0)
+                    for i in 0..<batchSize {
+                        try batchTensor.setBatchSample(tensor: inputTensor.value, batchIndex: i)
+                    }
+                    feedData.append(try batchTensor.getMPSGraphTensorData(forDevice: device))
+                }
+                else {
+                    feedData.append(try inputTensor.value.getMPSGraphTensorData(forDevice: device))
+                }
+            }
+            else {
+                if (feedTensor.neededForMode(mode)) {
+                    throw MPSGraphRunErrors.PlaceHolderInputNotFound(feedTensor.name)
+                }
+            }
+        }
+        
+        //  Add the learning parameter tensors to the input list as needed
+        if (!learningRateConstant) {
+            let learningRateValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(learningRate))
+            feedData.append(try learningRateValueTensor.getMPSGraphTensorData(forDevice: device))
+        }
+        if (!β1Constant && β1Tensor != nil) {
+            let β1ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β1))
+            feedData.append(try β1ValueTensor.getMPSGraphTensorData(forDevice: device))
+        }
+        if (!β2Constant && β2Tensor != nil) {
+            let β2ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β2))
+            feedData.append(try β2ValueTensor.getMPSGraphTensorData(forDevice: device))
+        }
+        if (!ϵConstant && ϵTensor != nil) {
+            let ϵValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(ϵ))
+            feedData.append(try ϵValueTensor.getMPSGraphTensorData(forDevice: device))
+        }
+        if (!μConstant && μTensor != nil) {
+            let μValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(μ))
+            feedData.append(try μValueTensor.getMPSGraphTensorData(forDevice: device))
+        }
+
+        //  If there is a training/testing mode tensor, add it to the feed
+        if (trainingModeTensor != nil) {
+            let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : learningModes.contains(mode) ? 1 : 0)
+            feedData.append(try trainingModeValue.getMPSGraphTensorData(forDevice: device))
+        }
+
+        //  Create the execution descriptor
+        let executionDescriptor = MPSGraphExecutableExecutionDescriptor()
+        executionDescriptor.waitUntilCompleted = true
+        
+        let results = executables[mode]!.encode(to: localCommandBuffer, inputs: feedData, results: executableResults[mode]!, executionDescriptor: executionDescriptor)
+        localCommandBuffer.commit()
+        localCommandBuffer.waitUntilCompleted()
+        
+        //  Convert results into tensors
+        var resultTensors: [String : Tensor] = [:]
+        let resultNames = executableTargetNames[mode]!
+        for i in 0..<resultNames.count {
+            //  Convert the MPSGraphTensorData to a Tensor
+            let resultTensor = CreateTensor.fromMPSTensorData(results[i])
+            resultTensors[resultNames[i]] = resultTensor
+        }
+        
+        return resultTensors
+    }
+    
+    public func encodeWithoutCommitForExecutable(mode: String, inputTensors: [String : Tensor], completionHandler: MPSGraphDSLEncodeCompletionHandler? = nil) throws {
+        if (executables[mode] == nil) { throw MPSGraphRunErrors.NoCompiledExecutableForMode }
+
+        //  Verify the input tensors are usable
+        let allAreBatchTensors = try verifyInputTensors(inputTensors)
+
+        //  Get the command buffer
+        if (commandBuffer == nil) { commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!) }
+
+        //  Get the input tensors - must be in same order as compile!
+        var feedData: [MPSGraphTensorData] = []
+        for feedTensor in feedTensors {
+            //  Find the input tensor that matches
+            if let inputTensor = inputTensors.first(where: { $0.key == feedTensor.name }) {
+                if (!allAreBatchTensors && !feedTensor.batchExemption) {
+                    //  Repeat the tensor batchSize times to make a batch tensor out of it
+                    let batchTensorShape = inputTensor.value.shape.shapeWithAddedBatchDimension(batchSize)
+                    var batchTensor = CreateTensor.constantValues(type: inputTensor.value.type, shape: batchTensorShape, initialValue: 0.0)
+                    for i in 0..<batchSize {
+                        try batchTensor.setBatchSample(tensor: inputTensor.value, batchIndex: i)
+                    }
+                    feedData.append(try batchTensor.getMPSGraphTensorData(forDevice: device))
+                }
+                else {
+                    feedData.append(try inputTensor.value.getMPSGraphTensorData(forDevice: device))
+                }
+            }
+            else {
+                if (feedTensor.neededForMode(mode)) {
+                    throw MPSGraphRunErrors.PlaceHolderInputNotFound(feedTensor.name)
+                }
+            }
+        }
+        
+        //  Add the learning parameter tensors to the input list as needed
+        if (!learningRateConstant) {
+            let learningRateValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(learningRate))
+            feedData.append(try learningRateValueTensor.getMPSGraphTensorData(forDevice: device))
+        }
+        if (!β1Constant && β1Tensor != nil) {
+            let β1ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β1))
+            feedData.append(try β1ValueTensor.getMPSGraphTensorData(forDevice: device))
+        }
+        if (!β2Constant && β2Tensor != nil) {
+            let β2ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β2))
+            feedData.append(try β2ValueTensor.getMPSGraphTensorData(forDevice: device))
+        }
+        if (!ϵConstant && ϵTensor != nil) {
+            let ϵValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(ϵ))
+            feedData.append(try ϵValueTensor.getMPSGraphTensorData(forDevice: device))
+        }
+        if (!μConstant && μTensor != nil) {
+            let μValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(μ))
+            feedData.append(try μValueTensor.getMPSGraphTensorData(forDevice: device))
+        }
+
+        //  If there is a training/testing mode tensor, add it to the feed
+        if (trainingModeTensor != nil) {
+            let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : learningModes.contains(mode) ? 1 : 0)
+            feedData.append(try trainingModeValue.getMPSGraphTensorData(forDevice: device))
+        }
+
+        //  Create the execution descriptorxs
+        let executionDescriptor = MPSGraphExecutableExecutionDescriptor()
+        let resultTensorNames = executableTargetNames[mode]!
+        if let completionHandler = completionHandler {
+            executionDescriptor.completionHandler = { (resultsArray, error) in
+                var resultTensors : [String: Tensor] = [:]
+                for i in 0..<resultsArray.count {
+                    //  Convert MPSGraphTensorData to a Tensor
+                    resultTensors[resultTensorNames[i]] = CreateTensor.fromMPSTensorData(resultsArray[i])
+                }
+                completionHandler(resultTensors)
+            }
+        }
+
+        _ = executables[mode]!.encode(to: commandBuffer!, inputs: feedData, results: executableResults[mode]!, executionDescriptor: executionDescriptor)
+    }
+
     /// Run all, or a specified set of,  samples of a testing dataset through the graph and return the number/percentage correct
     /// - Parameters:
     ///   - mode: The name of the inference mode of the graph
@@ -1199,7 +1435,7 @@ public class Graph {
                 await doubleBufferHandler.getAllowance()
 
                 //  Get the command buffer
-                let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
+                let localCommandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
                 
                 //  Get the input Tensor
                 var inputTensor: Tensor
@@ -1221,12 +1457,12 @@ public class Graph {
                 }
                 
                 //  Convert the input tensor to MPS version and create the feed dictionary
-                var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forGraph: self)]
+                var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forDevice: device)]
                 
                 //  If there is a training/testing mode tensor, add it to the feed
                 if (trainingModeTensor != nil) {
                     let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : 0)
-                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
+                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forDevice: device)
                 }
                 
                 //  Set up the target operations
@@ -1271,13 +1507,13 @@ public class Graph {
                 }
 
                 //  Run the graph
-                let _ = mpsgraph.encode(to: commandBuffer,
+                let _ = mpsgraph.encode(to: localCommandBuffer,
                                               feeds: feedDict,
                                               targetTensors: targets,
                                               targetOperations: targetOperations,
                                               executionDescriptor: executionDesc)
 
-                commandBuffer.commit()
+                localCommandBuffer.commit()
             }
         }
         catch {
@@ -1381,7 +1617,7 @@ public class Graph {
                 await doubleBufferHandler.getAllowance()
 
                 //  Get the command buffer
-                let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
+                let localCommandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
                 
                 //  Get the input and output Tensors
                 var inputTensor: Tensor
@@ -1404,12 +1640,12 @@ public class Graph {
                 }
                 
                 //  Convert the input tensor to MPS version and create the feed dictionary
-                var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forGraph: self)]
+                var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forDevice: device)]
                 
                 //  If there is a training/testing mode tensor, add it to the feed
                 if (trainingModeTensor != nil) {
                     let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : 0)
-                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
+                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forDevice: device)
                 }
                 
                 //  Set up the target operations
@@ -1432,13 +1668,13 @@ public class Graph {
                  }
 
                 //  Run the graph
-                let _ = mpsgraph.encode(to: commandBuffer,
+                let _ = mpsgraph.encode(to: localCommandBuffer,
                                               feeds: feedDict,
                                               targetTensors: targets,
                                               targetOperations: targetOperations,
                                               executionDescriptor: executionDesc)
 
-                commandBuffer.commit()
+                localCommandBuffer.commit()
             }
         }
         catch {
@@ -1461,12 +1697,8 @@ public class Graph {
     ///   - expectedValueTensorName: The name of the input tensor for the expected value (PlaceHolder)
     ///   - lossTensorName: (Optional) The name of the output tensor for the loss calculation.  This node must be a target for the mode passed in
     ///   - epochSize: (Optional) The number of random samples, or random batches if a batch graph, the graph is trained on.  If nil all samples are processed sequentially.  Default is nil
-    ///   - newLearningRate: (Optional) if a non-constant learning rate is specified (see ``Learning``, the value can be changed for subsequent runs with this parameter
-    ///   - newβ1: (Optional) if a non-constant β1 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
-    ///   - newβ2: (Optional) if a non-constant β2 parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
-    ///   - newϵ: (Optional) if a non-constant ϵ parameter is specified for an adam optimizer (see ``Learning``), the value can be changed for subsequent runs with this parameter
     /// - Returns: The average loss value for the run - or nil if no loss tensor name was provided
-    public func runTraining(mode: String, trainingDataSet: DataSet, inputTensorName: String, expectedValueTensorName : String, lossTensorName: String? = nil, epochSize: Int? = nil, newLearningRate: Double? = nil, newβ1: Double? = nil, newβ2: Double? = nil, newϵ: Double? = nil, newμ: Double? = nil) async throws -> Double? {
+    public func runTraining(mode: String, trainingDataSet: DataSet, inputTensorName: String, expectedValueTensorName : String, lossTensorName: String? = nil, epochSize: Int? = nil) async throws -> Double? {
         //  Verify the input tensors are usable
         if (!trainingDataSet.inputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
         if (!trainingDataSet.outputType.usableInGraph()) { throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph }
@@ -1481,23 +1713,6 @@ public class Graph {
         if (mpsgraph == nil) { try buildGraph() }
         if (device == nil) { getCommandQueue() }
         
-        //  If a new learning rate or adam optimization parameter entered - set it
-        if let newlearningRate = newLearningRate {
-            learningRate = newlearningRate
-        }
-        if let newβ1 = newβ1 {
-            β1 = newβ1
-        }
-        if let newβ2 = newβ2 {
-            β2 = newβ2
-        }
-        if let newϵ = newϵ {
-            ϵ = newϵ
-        }
-        if let newμ = newμ {
-            μ = newμ
-        }
-
         //  Get the targetTensors
         var targets : [MPSGraphTensor] = []
         for targetTensor in targetTensors {
@@ -1557,7 +1772,7 @@ public class Graph {
                 await doubleBufferHandler.getAllowance()
 
                 //  Get the command buffer
-                let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
+                let localCommandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
 
                 //  Get the input and output Tensors
                 var inputTensor: Tensor
@@ -1595,35 +1810,35 @@ public class Graph {
 
                 //  Convert the input and output tensors to MPS versions and create the feed dictionary
                 var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [:]
-                feedDict[inputFeedTensorInfo!.tensor] = try inputTensor.getMPSGraphTensorData(forGraph: self)
-                feedDict[expectedValueFeedTensorInfo!.tensor] = try outputTensor.getMPSGraphTensorData(forGraph: self)
+                feedDict[inputFeedTensorInfo!.tensor] = try inputTensor.getMPSGraphTensorData(forDevice: device)
+                feedDict[expectedValueFeedTensorInfo!.tensor] = try outputTensor.getMPSGraphTensorData(forDevice: device)
                 
                 //  Add non-constant training parameters to the feed dictionary
                 if (!learningRateConstant) {
                     let learningRateValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(learningRate))
-                    feedDict[learningRateTensor!] = try learningRateValueTensor.getMPSGraphTensorData(forGraph: self)
+                    feedDict[learningRateTensor!] = try learningRateValueTensor.getMPSGraphTensorData(forDevice: device)
                 }
                 if (!β1Constant && β1Tensor != nil) {
                     let β1ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β1))
-                    feedDict[β1Tensor!] = try β1ValueTensor.getMPSGraphTensorData(forGraph: self)
+                    feedDict[β1Tensor!] = try β1ValueTensor.getMPSGraphTensorData(forDevice: device)
                 }
                 if (!β2Constant && β2Tensor != nil) {
                     let β2ValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(β2))
-                    feedDict[β2Tensor!] = try β2ValueTensor.getMPSGraphTensorData(forGraph: self)
+                    feedDict[β2Tensor!] = try β2ValueTensor.getMPSGraphTensorData(forDevice: device)
                 }
                 if (!ϵConstant && ϵTensor != nil) {
                     let ϵValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(ϵ))
-                    feedDict[ϵTensor!] = try ϵValueTensor.getMPSGraphTensorData(forGraph: self)
+                    feedDict[ϵTensor!] = try ϵValueTensor.getMPSGraphTensorData(forDevice: device)
                 }
                 if (!μConstant && μTensor != nil) {
                     let μValueTensor = TensorFloat32(shape : TensorShape([1]), initialValue : Float32(μ))
-                    feedDict[μTensor!] = try μValueTensor.getMPSGraphTensorData(forGraph: self)
+                    feedDict[μTensor!] = try μValueTensor.getMPSGraphTensorData(forDevice: device)
                 }
                 
                 //  If there is a training/testing mode tensor, add it to the feed
                 if (trainingModeTensor != nil) {
                     let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : 1)
-                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
+                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forDevice: device)
 
                 }
 
@@ -1646,12 +1861,12 @@ public class Graph {
                 }
 
                 //  Run the graph
-                let _ = mpsgraph.encode(to: commandBuffer,
+                let _ = mpsgraph.encode(to: localCommandBuffer,
                                               feeds: feedDict,
                                               targetTensors: targets,
                                               targetOperations: targetOperations,
                                               executionDescriptor: executionDesc)
-                commandBuffer.commit()
+                localCommandBuffer.commit()
             }
         }
         catch {
@@ -1747,7 +1962,7 @@ public class Graph {
                 await doubleBufferHandler.getAllowance()
 
                 //  Get the command buffer
-                let commandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
+                let localCommandBuffer = MPSCommandBuffer(commandBuffer: commandQueue.makeCommandBuffer()!)
                 
                 //  Get the input Tensor
                 var inputTensor: Tensor
@@ -1769,12 +1984,12 @@ public class Graph {
                 }
                 
                 //  Convert the input tensor to MPS version and create the feed dictionary
-                var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forGraph: self)]
+                var feedDict : [MPSGraphTensor: MPSGraphTensorData] = [inputFeedTensorInfo!.tensor : try inputTensor.getMPSGraphTensorData(forDevice: device)]
                 
                 //  If there is a training/testing mode tensor, add it to the feed
                 if (trainingModeTensor != nil) {
                     let trainingModeValue = TensorInt32(shape : TensorShape([1]), initialValue : 0)
-                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forGraph: self)
+                    feedDict[trainingModeTensor!] = try trainingModeValue.getMPSGraphTensorData(forDevice: device)
                 }
 
                 //  Create the callback
@@ -1806,13 +2021,13 @@ public class Graph {
                 }
 
                 //  Run the graph
-                let _ = mpsgraph.encode(to: commandBuffer,
+                let _ = mpsgraph.encode(to: localCommandBuffer,
                                               feeds: feedDict,
                                               targetTensors: targets,
                                               targetOperations: nil,
                                               executionDescriptor: executionDesc)
 
-                commandBuffer.commit()
+                localCommandBuffer.commit()
             }
         }
         catch {

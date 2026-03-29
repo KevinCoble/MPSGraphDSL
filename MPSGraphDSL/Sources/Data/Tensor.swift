@@ -18,7 +18,7 @@ public protocol Tensor : Sendable {
     func getElement(index : Int) throws -> Double
     func getElement(location: [Int]) throws -> Double
     func getElements() -> [Double]
-    func getMPSGraphTensorData(forGraph: Graph) throws -> MPSGraphTensorData
+    func getMPSGraphTensorData(forDevice: MTLDevice) throws -> MPSGraphTensorData
     func getClassification() -> Int
 
     //  Parsing store functions
@@ -640,9 +640,9 @@ public struct TensorDouble : Tensor {
      }
     
     /// Create a MPSGraphTensorData object for the specified graph, using the data in the Tensor
-    /// - Parameter forGraph: The ``Graph`` object that the MPSGraphTensorData will be used with
+    /// - Parameter forDevice: The Metal Device the tensor data will be used with.  Should come from the ``Graph`` object
     /// - Returns: The create MPSGraphTensorData object
-    public func getMPSGraphTensorData(forGraph: Graph) throws -> MPSGraphTensorData {
+    public func getMPSGraphTensorData(forDevice: MTLDevice) throws -> MPSGraphTensorData {
         throw GenericMPSGraphDSLErrors.TypeNotUsableByGraph
     }
     
@@ -1028,11 +1028,11 @@ public struct TensorFloat32 : Tensor {
      }
     
     /// Create a MPSGraphTensorData object for the specified graph, using the data in the Tensor
-    /// - Parameter forGraph: The ``Graph`` object that the MPSGraphTensorData will be used with
+    /// - Parameter forDevice: The Metal Device the tensor data will be used with.  Should come from the ``Graph`` object
     /// - Returns: The create MPSGraphTensorData object
-    public func getMPSGraphTensorData(forGraph: Graph) throws -> MPSGraphTensorData {
+    public func getMPSGraphTensorData(forDevice: MTLDevice) throws -> MPSGraphTensorData {
         let descriptor = MPSNDArrayDescriptor(dataType: DataType.float32.getMPSDataType(), shape: shape.getMPSShape())
-        let NDArray = MPSNDArray(device: forGraph.device, descriptor: descriptor)
+        let NDArray = MPSNDArray(device: forDevice, descriptor: descriptor)
         var array = elements
         NDArray.writeBytes(&array, strideBytes: nil)
         return MPSGraphTensorData(NDArray)
@@ -1451,11 +1451,11 @@ public struct TensorFloat16 : Tensor {
      }
     
     /// Create a MPSGraphTensorData object for the specified graph, using the data in the Tensor
-    /// - Parameter forGraph: The ``Graph`` object that the MPSGraphTensorData will be used with
+    /// - Parameter forDevice: The Metal Device the tensor data will be used with.  Should come from the ``Graph`` object
     /// - Returns: The create MPSGraphTensorData object
-    public func getMPSGraphTensorData(forGraph: Graph) throws -> MPSGraphTensorData {
+    public func getMPSGraphTensorData(forDevice: MTLDevice) throws -> MPSGraphTensorData {
         let descriptor = MPSNDArrayDescriptor(dataType: DataType.float16.getMPSDataType(), shape: shape.getMPSShape())
-        let NDArray = MPSNDArray(device: forGraph.device, descriptor: descriptor)
+        let NDArray = MPSNDArray(device: forDevice, descriptor: descriptor)
         var array = elements
         NDArray.writeBytes(&array, strideBytes: nil)
         return MPSGraphTensorData(NDArray)
@@ -1879,11 +1879,11 @@ public struct TensorInt32 : Tensor {
      }
 
     /// Create a MPSGraphTensorData object for the specified graph, using the data in the Tensor
-    /// - Parameter forGraph: The ``Graph`` object that the MPSGraphTensorData will be used with
+    /// - Parameter forDevice: The Metal Device the tensor data will be used with.  Should come from the ``Graph`` object
     /// - Returns: The create MPSGraphTensorData object
-    public func getMPSGraphTensorData(forGraph: Graph) throws -> MPSGraphTensorData {
+    public func getMPSGraphTensorData(forDevice: MTLDevice) throws -> MPSGraphTensorData {
         let descriptor = MPSNDArrayDescriptor(dataType: DataType.int32.getMPSDataType(), shape: shape.getMPSShape())
-        let NDArray = MPSNDArray(device: forGraph.device, descriptor: descriptor)
+        let NDArray = MPSNDArray(device: forDevice, descriptor: descriptor)
         var array = elements
         NDArray.writeBytes(&array, strideBytes: nil)
         return MPSGraphTensorData(NDArray)
@@ -2333,11 +2333,11 @@ public struct TensorUInt8 : Tensor {
      }
 
     /// Create a MPSGraphTensorData object for the specified graph, using the data in the Tensor
-    /// - Parameter forGraph: The ``Graph`` object that the MPSGraphTensorData will be used with
+    /// - Parameter forDevice: The Metal Device the tensor data will be used with.  Should come from the ``Graph`` object
     /// - Returns: The create MPSGraphTensorData object
-    public func getMPSGraphTensorData(forGraph: Graph) throws -> MPSGraphTensorData {
+    public func getMPSGraphTensorData(forDevice: MTLDevice) throws -> MPSGraphTensorData {
         let descriptor = MPSNDArrayDescriptor(dataType: DataType.uInt8.getMPSDataType(), shape: shape.getMPSShape())
-        let NDArray = MPSNDArray(device: forGraph.device, descriptor: descriptor)
+        let NDArray = MPSNDArray(device: forDevice, descriptor: descriptor)
         var array = elements
         NDArray.writeBytes(&array, strideBytes: nil)
         return MPSGraphTensorData(NDArray)
@@ -2760,11 +2760,11 @@ public struct TensorBool : Tensor {
      }
 
     /// Create a MPSGraphTensorData object for the specified graph, using the data in the Tensor
-    /// - Parameter forGraph: The ``Graph`` object that the MPSGraphTensorData will be used with
+    /// - Parameter forDevice: The Metal Device the tensor data will be used with.  Should come from the ``Graph`` object
     /// - Returns: The create MPSGraphTensorData object
-    public func getMPSGraphTensorData(forGraph: Graph) throws -> MPSGraphTensorData {
+    public func getMPSGraphTensorData(forDevice: MTLDevice) throws -> MPSGraphTensorData {
         let descriptor = MPSNDArrayDescriptor(dataType: DataType.bool.getMPSDataType(), shape: shape.getMPSShape())
-        let NDArray = MPSNDArray(device: forGraph.device, descriptor: descriptor)
+        let NDArray = MPSNDArray(device: forDevice, descriptor: descriptor)
         var array = elements
         NDArray.writeBytes(&array, strideBytes: nil)
         return MPSGraphTensorData(NDArray)

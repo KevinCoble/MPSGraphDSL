@@ -52,7 +52,8 @@ The following activation functions are supported:
 |  Sigmoid (σ)                        |  .sigmoid  | Sigmoid |
 |  Leaky ReLU                         |  .leakyRelu(alpha)     | LeakyReLU |
 |  Leaky ReLU from Tensor             |  .leakyRelu(tensor)    | LeakyReLU |
-|  Gaussian Error Linear Unit (GELU)  |  .grelu     | GELU |
+|  Gaussian Error Linear Unit (GELU)  |  .gelu     | GELU |
+|  GELU using the tanh approximation  |  .gelu_tanh_approx     | GELU_tanh_approx |
 |  Exponential Linear Unit (ELU)      |  .elu(alpha)     | ELU |
 
 
@@ -86,7 +87,11 @@ The following modifiers are available for the Linear node:
 | ----------------------------------| ----------- |
 |  weightInitialization(initializerInfo:)   |  Sets the method and parameters for random initialization of the weights Variable       |
 |  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
-|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  weightOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the weights       |
+|  weightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the weights       |
+|  biasOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the biases       |
+|  biasLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the biases       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the FullyConnectedLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -141,7 +146,11 @@ The following modifiers are available for the FullyConnectedLayer node:
 |  noBiasTerm()                     |  If added removes the bias Variable and the addition of it to the matrix multiplication  |
 |  weightInitialization(initializerInfo:)   |  Sets the method and parameters for random initialization of the weights Variable       |
 |  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
-|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  weightOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the weights       |
+|  weightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the weights       |
+|  biasOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the biases       |
+|  biasLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the biases       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the FullyConnectedLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -221,7 +230,13 @@ The following modifiers are available for the RNNLayer node:
 |  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
 |  makeBidirectional()     |  Makes the layer bidirectional                          |
 |  setOutput(createLastState, targetLoops, targetLasts)  |  Sets the output flags.  See above discussion   |
-|  learnWithRespectTo(_ lossNode, gradientClipping, using:)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  rWeightOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the recurrent weights       |
+|  rWeightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the recurrent weights       |
+|  iWeightOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the input weights       |
+|  iWeightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the input weights       |
+|  biasOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the biases       |
+|  biasLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the biases       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the RNNLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -309,7 +324,12 @@ The following modifiers are available for the LSTMLayer node:
 |  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
 |  makeBidirectional()     |  Makes the layer bidirectional                          |
 |  setOutput(produceCellOutput, createLastState, createLastCell, targetLoops, targetLasts)  |  Sets the output flags.  See above discussion   |
-|  learnWithRespectTo(_ lossNode, gradientClipping, using:)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  rWeightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the recurrent weights       |
+|  iWeightOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the input weights       |
+|  iWeightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the input weights       |
+|  biasOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the biases       |
+|  biasLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the biases       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the LSTMLayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -391,7 +411,12 @@ The following modifiers are available for the GRULayer node:
 |  biasInitialValue(initialValue:)     |  Sets the initial value for initialization of the bias Variable                           |
 |  makeBidirectional()     |  Makes the layer bidirectional                          |
 |  setOutput(createLastState, targetLoops, targetLasts)  |  Sets the output flags.  See above discussion   |
-|  learnWithRespectTo(_ lossNode, gradientClipping, using:)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode)             |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  rWeightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the recurrent weights       |
+|  iWeightOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the input weights       |
+|  iWeightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the input weights       |
+|  biasOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the biases       |
+|  biasLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the biases       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the GRULayer node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -550,7 +575,11 @@ The following modifiers are available for the ConvolutionLayer node:
 |  biasInitialRange(min:, max:)     |  Sets the range for random initialization of the bias Variable                           |
 |  padding(bottomPadding:, topPadding:, leftPadding:, rightPadding:, backPadding:, frontPadding:, paddingStyle:)   |  Sets the padding parameters      |
 |  dilationRates(dilationRateH:, dilationRateW:, dilationRateD:)   |  Sets the dilation rates for all dimensions of the kernel      |
-|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  weightOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the weights       |
+|  weightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the weights       |
+|  biasOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the biases       |
+|  biasLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the biases       |
 
 ####  Tensors Added by a ConvolutionLayer
 
@@ -600,7 +629,11 @@ The following modifier is available for the BatchNormalization node:
 
 | Modifier            | Description |
 | ----------------------------------| ----------- |
-|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  gammaOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the gamma matrix       |
+|  gammaLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the gamma matrix       |
+|  betaptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the beta matrix       |
+|  betaLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the beta matrix       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the BatchNormalization node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -675,7 +708,11 @@ The following modifier is available for the LayerNormalization node:
 
 | Modifier            | Description |
 | ----------------------------------| ----------- |
-|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  gammaOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the gamma matrix       |
+|  gammaLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the gamma matrix       |
+|  betaptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the beta matrix       |
+|  betaLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the beta matrix       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the LayerNormalization node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -744,7 +781,23 @@ The following modifier is available for the SelfAttention node:
 |  queryBiasInitialValue(initialValue: )      |  Sets the initial value for the bias term in the Query projection generator.  The default value is 0       |
 |  keyBiasInitialValue(initialValue: )      |  Sets the initial value for the bias term in the Key projection generator.  The default value is 0       |
 |  valueBiasInitialValue(initialValue: )      |  Sets the initial value for the bias term in the Value projection generator.  The default value is 0       |
-|  learnWithRespectTo(_ lossNode, gradientClipping, using:)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  learnWithRespectTo(_ lossNode)   |  Sets the node to have the Variables learn with respect to the specified loss node       |
+|  weightsOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of all weights (query, key, and value)      |
+|  weightsLearningOptions(_ options) |  Sets the complet learning options structure use for learning of all weights (query, key, and value)       |
+|  keyWeightOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the key projection weights       |
+|  keyWeightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the key projection weights       |
+|  queryWeightOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the query projection weights       |
+|  queryWeightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the query projection weights       |
+|  valueWeightOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the value projection weights       |
+|  valueWeightLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the value projection weights       |
+|  biasOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of all biases (query, key, and value)       |
+|  biasLearningOptions(_ options) |  Sets the complet learning options structure use for learning of all biases (query, key, and value)        |
+|  keyBiasOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the key projection biases       |
+|  keyBiasLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the key projection biases       |
+|  queryBiasOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the query projection biases       |
+|  queryBiasLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the query projection biases       |
+|  valueBiasOptimizer(_ optimizer)     |  Sets the optimizer to be used for learning of the value projection biases       |
+|  valueBiasLearningOptions(_ options) |  Sets the complet learning options structure use for learning of the value projection biases       |
 
 As with all nodes, the targetForModes modifier is available, but should be added after all other modifiers.  Only some tensors created by the SelfAttention node will be targetted when this modifier is used.  See the 'Tensors Added' section for more information.
 
@@ -774,7 +827,9 @@ The following tensors are added to the Graph by the node:
 | "_scaledQxKT"           |     No     | The QxKT tensor scaled by 1/sqrt(head size)    |
 | "_maskedScaledQxKT"     |     No     | If a mask is specified. The scaled QxKT tensor with the added mask    |
 | "_softmax"              |     No     | The SoftMax operation applied to the scaled (and possibly masked) QxKT tensor     |
-| "_scaledAttention"     |      No     | The result of the SoftMax operation mulitiplied by the Value projection matrix     |
+| "_dropout"              |     No     | The optional dropout result after the softmax     |
+| "_training_dropout"     |     No     | The SoftMax or the dropout result, depending on the training mode (dropout only during training)     |
+| "_scaledAttention"     |      No     | The result of the SoftMax or optional dropout operation mulitiplied by the Value projection matrix     |
 | ""                     |     Yes    | If numHeads == 1.  The output reshaped to remove the 'head' dimension added at the beginning    |
 | "_transposedHeadsAndSizes" or "" |      No     | If numHeads > 1.  The head and feature dimension transposed to make the shape (batch x) blockSize x numHeads x headSize     |
 | ""                     |     Yes    | If numHeads > 1 and concatHeads == true.  The output reshaped to remove the 'head' dimension added at the beginning    |

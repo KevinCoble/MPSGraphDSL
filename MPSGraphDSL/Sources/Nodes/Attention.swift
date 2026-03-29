@@ -58,6 +58,7 @@ public class SelfAttention : UnaryNode {
     let headSize: Int
     let numHeads: Int
     let masked: Bool
+    let dropoutRate: Double?
     let concatHeads: Bool
 
     var queryWeightInitialization: WeightInitialization = .XavierGlorotNormal
@@ -90,12 +91,14 @@ public class SelfAttention : UnaryNode {
     ///   - headSize: The size of the query and key, vectors produced from each token embedding
     ///   - numHeads: (Optional) The number of independent attention heads.  Default is 1.  The head dimension is removed at the end if head count is 1
     ///   - masked: (Optional)  If true the upper-right triangle of the query x keys matrix is masked off, removing the ability of future tokens to affect previous tokens
+    ///   - dropoutRate: (Optional)  If not nil (the default), a dropout operation with the supplied rate will be added between the softmax operation and multiplication by the value projection
     ///   - concatHeads: (Optional)  If true and numHeads > 1, the heads dimension of the result gets concatenated out.  Default is false
     ///   - name: The name for this node and its associated tensor.
-    public init(input: String? = nil, headSize: Int, numHeads: Int = 1, masked: Bool = false, concatHeads: Bool = false, name: String) {
+    public init(input: String? = nil, headSize: Int, numHeads: Int = 1, masked: Bool = false, dropoutRate: Double? = nil, concatHeads: Bool = false, name: String) {
         self.headSize = headSize
         self.numHeads = numHeads
         self.masked = masked
+        self.dropoutRate = dropoutRate
         self.concatHeads = concatHeads
         super.init(input: input, name: name)
     }
@@ -217,9 +220,29 @@ public class SelfAttention : UnaryNode {
         }
         
         //  Softmax in the last dimension
-        let softMax = graph.mpsgraph.softMax(with: scaledQxKT, axis: scaledQxKT.shape!.count - 1, name: name! + "_softmax")
+        var softMax = graph.mpsgraph.softMax(with: scaledQxKT, axis: scaledQxKT.shape!.count - 1, name: name! + "_softmax")
         addedTensors.append(softMax)
         suffixes.append("_softmax")
+        
+        //  If a dropout rate has been supplied, add a dropout operation for training modes here
+        if let dropoutRate = dropoutRate {
+            //  Add or get the training flag tensor
+            let trainingModeTensor = graph.getTrainingModeTensor()
+            
+            let dropout = graph.mpsgraph.dropout(softMax, rate: dropoutRate, name: name! + "_dropout")
+            addedTensors.append(dropout)
+            suffixes.append("_dropout")
+            
+            let trainingDropout = graph.mpsgraph.if(trainingModeTensor, then: { () -> [MPSGraphTensor] in
+                return [dropout]
+            }, else: { () -> [MPSGraphTensor] in
+                return [softMax]
+            }, name: graph.getFullName(name))
+            addedTensors.append(trainingDropout[0])
+            suffixes.append("_training_dropout")
+
+            softMax = trainingDropout[0]
+        }
 
         //  Multiply by the value
         let attention = graph.mpsgraph.matrixMultiplication(primary: softMax, secondary: valueTensor, name: name! + "_scaledAttention")
@@ -586,6 +609,7 @@ public class CrossAttention : BinaryNode {
     let headSize: Int
     let numHeads: Int
     let masked: Bool
+    let dropoutRate: Double?
     let concatHeads: Bool
     
     var queryWeightInitialization: WeightInitialization = .XavierGlorotNormal
@@ -619,12 +643,14 @@ public class CrossAttention : BinaryNode {
     ///   - headSize: The size of the query and key, vectors produced from each token embedding
     ///   - numHeads: (Optional) The number of independent attention heads.  Default is 1.  The head dimension is removed at the end if head count is 1
     ///   - masked: (Optional)  If true the upper-right triangle of the query x keys matrix is masked off, removing the ability of future tokens to affect previous tokens
+    ///   - dropoutRate: (Optional)  If not nil (the default), a dropout operation with the supplied rate will be added between the softmax operation and multiplication by the value projection
     ///   - concatHeads: (Optional)  If true and numHeads > 1, the heads dimension of the result gets concatenated out.  Default is false
     ///   - name: The name for this node and its associated tensor.
-    public init(input: String? = nil, crossInput: String? = nil, headSize: Int, numHeads: Int = 1, masked: Bool = false, concatHeads: Bool = false, name: String) {
+    public init(input: String? = nil, crossInput: String? = nil, headSize: Int, numHeads: Int = 1, masked: Bool = false, dropoutRate: Double? = nil, concatHeads: Bool = false, name: String) {
         self.headSize = headSize
         self.numHeads = numHeads
         self.masked = masked
+        self.dropoutRate = dropoutRate
         self.concatHeads = concatHeads
         super.init(firstInput: input, secondInput: crossInput, name: name)
     }
@@ -757,9 +783,17 @@ public class CrossAttention : BinaryNode {
         }
         
         //  Softmax in the last dimension
-        let softMax = graph.mpsgraph.softMax(with: scaledQxKT, axis: scaledQxKT.shape!.count - 1, name: name! + "_softmax")
+        var softMax = graph.mpsgraph.softMax(with: scaledQxKT, axis: scaledQxKT.shape!.count - 1, name: name! + "_softmax")
         addedTensors.append(softMax)
         suffixes.append("_softmax")
+        
+        //  If a dropout rate has been supplied, add a dropout operation here
+        if let dropoutRate = dropoutRate {
+            let dropout = graph.mpsgraph.dropout(softMax, rate: dropoutRate, name: name! + "_dropout")
+            addedTensors.append(dropout)
+            suffixes.append("_dropout")
+            softMax = dropout
+        }
 
         //  Multiply by the value
         let attention = graph.mpsgraph.matrixMultiplication(primary: softMax, secondary: valueTensor, name: name! + "_scaledAttention")
